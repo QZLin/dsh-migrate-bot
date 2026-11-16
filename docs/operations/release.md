@@ -15,20 +15,20 @@ git push origin HEAD
 git push origin "v$(cat VERSION)"
 ```
 
-The tag needs its own push: commitizen creates lightweight tags, which `git push --follow-tags` does not push. A pushed `vX.Y.Z` tag runs [the release workflow](../../.github/workflows/release.yml): it moves the major tag (`v2.1.0` moves `v2`) and opens a GitHub Release. Nothing else is published, because a composite Action is built from the tag it is pinned to; a consumer therefore always runs the sources of the tag its workflow names. To move a major tag back, run the release workflow by hand with the tag to point it at.
-
-The publisher uses `docker/metadata-action` to lowercase the GHCR image name and label it with the source repository and revision. On first publication GitHub creates the package as private, even for a public repository; set it to **Public** in Package settings before consumers use the Action ([GitHub's visibility procedure](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-packages-for-your-personal-account)). The release checks anonymous manifest access before moving the major tag or creating the GitHub Release. If that check stops the first publication, make the package public and rerun only the failed job; the image job does not need to publish again.
+The tag needs its own push: commitizen creates lightweight tags, which `git push --follow-tags` does not push. A pushed `vX.Y.Z` tag runs [the release workflow](../../.github/workflows/release.yml): it moves the major tag (`v3.1.0` moves `v3`) and opens a GitHub Release. Nothing else is published, because a composite Action is built from the tag it is pinned to; a consumer therefore always runs the sources of the tag its workflow names. To move a major tag back, run the release workflow by hand with the tag to point it at.
 
 ## What a consumer pins
 
-A consumer's workflow calls `QZLin/dsh-migrate-bot/.github/workflows/migrate.yml@v2`: the major tag, which moves to every release of that major version, so a breaking change needs a new major version. The major tag exists from the first final release of its version; until then, and to try a release candidate, a consumer pins the candidate's exact tag (`@v2.0.0-rc.1`), which never moves. Releases before 1.0.0 have no reusable workflow.
+A consumer's workflow calls `QZLin/dsh-migrate-bot/.github/workflows/migrate.yml@v3`: the major tag, which moves to every release of that major version, so a breaking change needs a new major version. The major tag exists from the first final release of its version; until then, and to try a release candidate, a consumer pins the candidate's exact tag (`@v3.0.0-rc.1`), which never moves. Releases before 1.0.0 have no reusable workflow.
+
+The `v2` major tag still points at the last container release, so a consumer that cannot install Node on its runner can pin it; `v3` and later are composite Actions.
 
 ## A release candidate
 
 A release candidate is tried on a few consumers before the major tag moves to it:
 
 ```sh
-cz bump --changelog --prerelease rc --prerelease-offset 1   # 2.0.0-rc.1, then rc.2, …
+cz bump --changelog --prerelease rc --prerelease-offset 1   # 3.0.0-rc.1, then rc.2, …
 git push origin HEAD
 git push origin "v$(cat VERSION)"
 ```
