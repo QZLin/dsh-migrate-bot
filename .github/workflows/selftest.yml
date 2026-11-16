@@ -1,0 +1,35 @@
+# Run this repository's own Action the way a consumer does: `uses: ./` builds
+# the composite Action on a plain runner, with no container runtime and no
+# published image. It is the only check that exercises `action.yml` itself.
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  composite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: config
+        uses: ./
+        with:
+          command: print-config
+          workdir: fixtures/plugins/typecheck-ok
+      - id: status
+        uses: ./
+        with:
+          command: status
+          workdir: fixtures/plugins/typecheck-ok
+      - name: The Action reports its inputs and outputs
+        run: |
+          set -euo pipefail
+          test -n "${{ steps.status.outputs.status }}"
+          test -n "${{ steps.config.outputs.badge_message }}"
+          echo "status: ${{ steps.status.outputs.status }}"
+          echo "badge: ${{ steps.config.outputs.badge_message }}"

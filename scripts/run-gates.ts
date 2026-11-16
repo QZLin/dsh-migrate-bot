@@ -19,7 +19,7 @@ import { verifyPureCore } from './verify-pure-core.ts'
 import { readReleaseFiles, verifyRelease } from './verify-release.ts'
 import { GLOSSARY, termDocuments, verifyTerms } from './verify-terms.ts'
 import { verifyProposals } from './verify-proposals.ts'
-import { verifyWorkflows } from './verify-workflows.ts'
+import { verifyAction, verifyWorkflows } from './verify-workflows.ts'
 import { readText } from './repo.ts'
 
 /** What one gate reported. */
@@ -72,7 +72,8 @@ export function runGates(): GateResult[] {
     listed('terms', 'no replaced word in prose, every term defined once', verifyTerms(termDocuments(), readText(GLOSSARY)).map(v => `${v.file}:${String(v.line)} ${v.detail}`)),
     listed('english', 'every tracked text file is English', verifyEnglish().map(v => `${v.file}:${String(v.line)} ${v.detail}`)),
     listed('md-wrap', 'every Markdown paragraph is one line', verifyMarkdownWrap().map(v => `${v.file}:${String(v.line)} continues a paragraph`)),
-    listed('workflows', 'all Actions workflow YAML and steps are valid', verifyWorkflows().map(v => `${v.file}: ${v.detail}`)),
+    listed('workflows', 'all workflow YAML and steps are valid', verifyWorkflows().map(v => `${v.file}: ${v.detail}`)),
+    listed('action', 'the Action manifest is a valid composite Action', verifyAction().map(v => `${v.file}: ${v.detail}`)),
     listed('release', 'every file states the version in VERSION', verifyRelease(readReleaseFiles())),
     listed('pure-core', 'src/workflow and src/domain import nothing with side effects', verifyPureCore().map(v => `${v.file} ${v.detail}`)),
     (() => {

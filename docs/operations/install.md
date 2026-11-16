@@ -15,7 +15,7 @@ description: Setting the Action up in a plugin repository: the workflow, the per
 
 The reusable workflow holds the concurrency group that keeps one writer of the state branch at a time, and runs one job, `bump`, on the schedule and on manual dispatch. The caller grants `contents: write` (the proposal branch and the state branch), `issues: write` and `pull-requests: write`. The reusable workflow takes three inputs — `target` and `force` for a manual run, and `config` for a configuration file at another path — and returns the Action's `status`, `target_tag`, `verified_tag` and `pull_request_url` as its outputs.
 
-The Action runs the image `ghcr.io/qzlin/dsh-migrate-bot` of its release, built once per release, so every consumer run uses the same Node and the same system packages.
+The Action is a composite Action: on each run it installs Node and the pnpm version pinned by `packageManager`, builds itself from the sources of the tag the workflow pins, and executes. No container runtime and no published image are involved, so a self-hosted runner needs only Node, git, bash and network access to the npm registry.
 
 The first scheduled run bumps to the target release. When a later run skips a release, and what `force` changes, is in [starting a migration](../design/workflow.md#6-starting-a-migration).
 

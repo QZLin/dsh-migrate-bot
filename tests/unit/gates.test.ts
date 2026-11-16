@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import { nonLatinLetters } from '../../scripts/verify-english.ts'
 import { wrappedLines } from '../../scripts/verify-md-wrap.ts'
 import { checkModule, runtimeImports } from '../../scripts/verify-pure-core.ts'
-import { ACTION_REPOSITORY, IMAGE, readReleaseFiles, verifyRelease } from '../../scripts/verify-release.ts'
+import { ACTION_REPOSITORY, readReleaseFiles, verifyRelease } from '../../scripts/verify-release.ts'
 import { glossaryTerms, verifyTerms } from '../../scripts/verify-terms.ts'
-import { verifyWorkflowSource, verifyWorkflows } from '../../scripts/verify-workflows.ts'
+import { verifyAction, verifyActionSource, verifyWorkflowSource, verifyWorkflows } from '../../scripts/verify-workflows.ts'
+
+const ACTION_YML = readReleaseFiles().actionYml
 
 const GLOSSARY = [
   '| Term | Definition | In code | Replaces |',
@@ -48,24 +50,36 @@ test('verify-md-wrap rejects a hard-wrapped paragraph and accepts lists, tables 
   assert.deepEqual(wrappedLines('d.md', source), [{ file: 'd.md', line: 9 }])
 })
 
-test('verify-release rejects a file that states another version', () => {
+test('verify-release requires every version statement to agree with VERSION', () => {
   const files = readReleaseFiles()
   assert.deepEqual(verifyRelease(files), [])
   const version = files.version.trim()
-  const drifted = verifyRelease({ ...files, actionYml: files.actionYml.replace(`:v${version}`, ':v0.0.1') })
-  assert.deepEqual(drifted, [`action.yml image says 0.0.1, VERSION says ${version}`])
-  const workflow = verifyRelease({ ...files, migrateYml: files.migrateYml.replace(`dsh-migrate-bot@v${version}`, 'dsh-migrate-bot@v1') })
+  const other = version === '0.0.1' ? '9.9.9' : '0.0.1'
+  const drifted = verifyRelease({ ...files, packageJson: JSON.stringify({ ...JSON.parse(files.packageJson), version: other }) })
+  assert.deepEqual(drifted, [`package.json says ${other}, VERSION says ${version}`])
+  const workflow = verifyRelease({ ...files, migrateYml: files.migrateYml.replace(`uses: ${ACTION_REPOSITORY}@v${version}`, `uses: ${ACTION_REPOSITORY}@v1`) })
   assert.deepEqual(workflow, [`migrate.yml uses #1 says 1, VERSION says ${version}`])
+  const missing = verifyRelease({ ...files, migrateYml: files.migrateYml.replace(`uses: ${ACTION_REPOSITORY}@v${version}`, '') })
+  assert.deepEqual(missing, [`migrate.yml says nothing, VERSION says ${version}`])
 })
 
-test('verify-release rejects upstream references and keeps the GHCR name lowercase', () => {
+test('verify-action requires a composite Action whose outputs name real step ids', () => {
+  assert.deepEqual(verifyAction(), [])
+  const docker = 'name: x\ndescription: y\nruns:\n  using: docker\n  image: docker://ghcr.io/owner/name:v1\n'
+  assert.ok(verifyActionSource(docker).some(problem => problem.detail.includes('using')))
+  const badOutput = ACTION_YML.replace('value: ${{ steps.run.outputs.status }}', 'value: ${{ steps.missing.outputs.status }}')
+  assert.deepEqual(verifyActionSource(badOutput), [{ file: 'action.yml', detail: 'output status names step missing, which is not a step id' }])
+  // A composite Action has no default shell, so a run step without one is invalid.
+  const noShell = 'name: x\ndescription: y\nruns:\n  using: composite\n  steps:\n    - run: echo hi\n'
+  assert.ok(verifyActionSource(noShell).some(problem => problem.detail.includes('shell')))
+})
+
+test('verify-release rejects upstream references and states the Action repository once', () => {
+  assert.equal(ACTION_REPOSITORY, 'QZLin/dsh-migrate-bot')
   const files = readReleaseFiles()
   const version = files.version.trim()
-  assert.equal(IMAGE, `ghcr.io/${ACTION_REPOSITORY.toLowerCase()}`)
-  const upstreamImage = files.actionYml.replace(IMAGE, 'ghcr.io/royenheart/dsh-migrate-bot')
-  assert.deepEqual(verifyRelease({ ...files, actionYml: upstreamImage }), [`action.yml image says nothing, VERSION says ${version}`])
-  const upstreamAction = files.migrateYml.replace(`uses: ${ACTION_REPOSITORY}@`, 'uses: royenheart/dsh-migrate-bot@')
-  assert.deepEqual(verifyRelease({ ...files, migrateYml: upstreamAction }), [`migrate.yml says nothing, VERSION says ${version}`])
+  const upstream = files.migrateYml.replace(`uses: ${ACTION_REPOSITORY}@`, 'uses: royenheart/dsh-migrate-bot@')
+  assert.deepEqual(verifyRelease({ ...files, migrateYml: upstream }), [`migrate.yml says nothing, VERSION says ${version}`])
 })
 
 test('verify-release rejects an unpinned package manager and a stale pnpm importer', () => {

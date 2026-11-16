@@ -1,6 +1,6 @@
 # dsh-migrate-bot
 
-A GitHub Action that raises a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin to each new `dsh-v*` release and runs the plugin's own checks. It consults no model and repairs nothing: it bumps the versions, runs the checks, and proposes what it tried — as a pull request when the checks pass, and as a draft pull request that says what failed when they do not.
+A GitHub Action that raises a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin to each new `dsh-v*` release and runs the plugin's own checks. It is a composite Action, consults no model, and repairs nothing: it bumps the versions, runs the checks, and proposes what it tried — as a pull request when the checks pass, and as a draft pull request that says what failed when they do not.
 
 ## What it does
 
@@ -59,10 +59,7 @@ node dist/src/cli.js check --workdir /path/to/plugin --target 0.2.0-rc.2
 
 `check` runs every check on a working tree without starting a migration or publishing a proposal. `bump` runs a whole migration; pass `--skip-github` so it calls no GitHub API and opens no proposal or issue. It still writes its state branch to the checkout's `origin` when there is one, and keeps it as a local ref when the clone has none. The boot and web checks install the target release from npm into `DSH_MIGRATE_HOME` (default `.dsh-migrate/`), once per release.
 
-```sh
-docker build -t dsh-migrate-bot .
-docker run --rm -v "$PWD/fixtures/plugins/typecheck-ok:/github/workspace" dsh-migrate-bot check --workdir /github/workspace --target 0.2.0-rc.2
-```
+The Action is a composite Action: it installs Node and pnpm on the runner, builds itself from the tag's own sources, and runs. No container runtime is needed, and no image has to be published, so a self-hosted runner needs only Node and git.
 
 ## Contributing
 

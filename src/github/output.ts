@@ -2,7 +2,7 @@ import { appendFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 
 /**
- * Write step outputs for a Docker GitHub Action (`$GITHUB_OUTPUT`).
+ * Write step outputs for a GitHub Action (`$GITHUB_OUTPUT`).
  * No-op outside Actions.
  *
  * A value with a newline in it is written with the heredoc form the runner

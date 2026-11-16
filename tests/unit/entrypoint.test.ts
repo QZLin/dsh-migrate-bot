@@ -8,7 +8,7 @@ import { parse } from 'yaml'
 import { appRootFrom } from '../../src/paths.ts'
 
 const root = appRootFrom(import.meta.url)
-const entrypoint = resolve(root, 'container/entrypoint.sh')
+const entrypoint = resolve(root, 'action/entrypoint.sh')
 
 /**
  * The entrypoint is bash with arrays. A bash that cannot run one cannot run it,
@@ -27,7 +27,7 @@ function argv(inputs: Record<string, string>, args: string[] = []): string[] {
     writeFileSync(cli, "import { writeFileSync } from 'node:fs'\nwriteFileSync(process.env.ARGV_OUT, JSON.stringify(process.argv.slice(2)))\n")
     const result = spawnSync('bash', [entrypoint, ...args], {
       encoding: 'utf8',
-      env: { PATH: process.env.PATH ?? '', HOME: dir, GITHUB_WORKSPACE: dir, DSH_MIGRATE_CLI: cli, ARGV_OUT: out, ...inputs },
+      env: { PATH: process.env.PATH ?? '', HOME: dir, GITHUB_WORKSPACE: dir, GITHUB_ACTION_PATH: root, DSH_MIGRATE_CLI: cli, ARGV_OUT: out, ...inputs },
     })
     assert.equal(result.status, 0, result.stderr)
     return (JSON.parse(readFileSync(out, 'utf8')) as string[]).map(arg => arg.replace(dir, '<workspace>'))
@@ -47,14 +47,27 @@ test('the command input chooses the verb, and every input it has is mapped', { s
   assert.deepEqual(argv({ INPUT_COMMAND: 'check', INPUT_TARGET: '0.2.0' }), ['check', '--workdir', '<workspace>/.', '--target=0.2.0'])
 })
 
-test('arguments given to docker run pass through unchanged', () => {
+test('arguments given to the entrypoint pass through unchanged', () => {
   assert.deepEqual(argv({ INPUT_COMMAND: 'bump' }, ['status']), ['status'])
 })
 
-test('every input the action declares is mapped by the entrypoint', () => {
-  const action = parse(readFileSync(resolve(root, 'action.yml'), 'utf8')) as { inputs: Record<string, unknown> }
-  const script = readFileSync(entrypoint, 'utf8')
-  for (const input of Object.keys(action.inputs)) {
-    assert.ok(script.includes(`INPUT_${input.toUpperCase()}`), `${input} is declared but not mapped`)
+test('an entrypoint that cannot locate the Action checkout fails instead of guessing', { skip: withoutArrays }, () => {
+  const result = spawnSync('bash', [entrypoint], { encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: tmpdir() } })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /GITHUB_ACTION_PATH is not set/)
+})
+
+test('every input the action declares is mapped by the manifest and the entrypoint', () => {
+  const action = parse(readFileSync(resolve(root, 'action.yml'), 'utf8')) as {
+    inputs: Record<string, unknown>
+    runs: { using: string; steps: Array<{ env?: Record<string, string> }> }
   }
+  const script = readFileSync(entrypoint, 'utf8')
+  const mapped = new Set(action.runs.steps.flatMap(step => Object.keys(step.env ?? {})))
+  for (const input of Object.keys(action.inputs)) {
+    const name = `INPUT_${input.toUpperCase()}`
+    assert.ok(mapped.has(name), `${input} is declared but the composite step does not pass ${name}`)
+    assert.ok(script.includes(name), `${input} is declared but the entrypoint does not read ${name}`)
+  }
+  assert.equal(action.runs.using, 'composite')
 })

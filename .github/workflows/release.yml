@@ -1,8 +1,6 @@
-# A pushed vX.Y.Z tag publishes the Action's image, then moves the major tag
-# (v1, v2, …) consumers pin. The image is pushed before the major tag moves, so
-# a consumer never resolves a tag whose image does not exist. A prerelease tag,
-# vX.Y.Z-rc.N, publishes its image and a GitHub prerelease and moves no major
-# tag: only a consumer who pins it runs it.
+# A pushed vX.Y.Z tag publishes a GitHub Release and moves the major tag (v1,
+# v2, …) consumers pin. The Action is a composite Action built from the tag's
+# own sources, so there is no image to publish first.
 
 name: release
 
@@ -20,56 +18,18 @@ on:
 
 permissions:
   contents: write
-  packages: write
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
-  image:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - id: metadata
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: type=raw,value=${{ env.TAG }}
-          flavor: latest=false
-          labels: |
-            org.opencontainers.image.description=Deterministic DeepSeek Harness plugin version bumps and checks without a model.
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      # The build runs `dsh-migrate print-config`, so an image whose CLI cannot
-      # load fails here and is never pushed.
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  major-tag:
-    needs: image
-    if: ${{ !cancelled() && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ env.TAG }}
-      - name: Check public image access
-        run: |
-          set -euo pipefail
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:$TAG"
-          docker manifest inspect "$image" > /dev/null
       - name: Move the major tag
         if: ${{ !contains(env.TAG, '-') }}
         run: |

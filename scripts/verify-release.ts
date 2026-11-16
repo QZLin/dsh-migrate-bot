@@ -2,9 +2,11 @@
  * Gate: every file that states the release version states the same one.
  *
  * Commitizen bumps `VERSION`, `package.json` and `.cz.toml` together and writes
- * the changelog section; the image and the reusable workflow name that release.
- * The pnpm lockfile stores dependency resolutions, not the Action's version,
- * so its root importer is checked against the manifest's dependency specifiers.
+ * the changelog section; the reusable workflow runs the Action of that version.
+ * The composite Action carries no version of its own because a consumer pins the
+ * tag, so no manifest outside `package.json` states one. The pnpm lockfile
+ * stores dependency resolutions rather than the version, so its root importer is
+ * checked against the manifest's dependency specifiers instead.
  */
 
 import { join } from 'node:path'
@@ -13,7 +15,6 @@ import { z } from 'zod'
 import { readText, REPO_ROOT } from './repo.ts'
 
 export const ACTION_REPOSITORY = 'QZLin/dsh-migrate-bot'
-export const IMAGE = `ghcr.io/${ACTION_REPOSITORY.toLowerCase()}`
 
 export interface ReleaseFiles {
   version: string
@@ -64,7 +65,6 @@ export function verifyRelease(files: ReleaseFiles): string[] {
   const stated: Array<[string, string | undefined]> = [
     ['package.json', manifest.version],
     ['.cz.toml', files.czToml.split('\n').find(line => line.startsWith('version = '))?.split('"')[1]],
-    ['action.yml image', files.actionYml.split('\n').find(line => line.includes(`docker://${IMAGE}:`))?.split(`${IMAGE}:v`)[1]?.trim()],
     ...migrateUses(files.migrateYml),
     ['CHANGELOG.md newest release', files.changelog.split('\n').find(line => line.startsWith('## v'))?.slice(4).split(' ')[0]],
   ]

@@ -32,16 +32,44 @@ inputs:
 outputs:
   status:
     description: compatible, proposed, unpublished, failed, error, skipped, or the state an event left the migration in
+    value: ${{ steps.run.outputs.status }}
   target_tag:
     description: The target release tag
+    value: ${{ steps.run.outputs.target_tag }}
   verified_tag:
     description: The newest verified release tag
+    value: ${{ steps.run.outputs.verified_tag }}
   badge_message:
     description: The badge message on the state branch
+    value: ${{ steps.run.outputs.badge_message }}
   pull_request_url:
     description: The proposal pull request, when there is one
+    value: ${{ steps.run.outputs.pull_request_url }}
 runs:
-  using: docker
-  # Built and published by the release workflow; the version is bumped with the
-  # release.
-  image: docker://ghcr.io/qzlin/dsh-migrate-bot:v2.0.0
+  using: composite
+  steps:
+    # The Action compiles its own TypeScript on the runner, so no image has to be
+    # published and no container runtime is needed. Development dependencies are
+    # installed because the build type-checks the tests and the gates too.
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+    - uses: pnpm/action-setup@v4
+      with:
+        package_json_file: ${{ github.action_path }}/package.json
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pnpm install --frozen-lockfile
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      run: pnpm run build
+    - id: run
+      shell: bash
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_WORKDIR: ${{ inputs.workdir }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_TARGET: ${{ inputs.target }}
+        INPUT_FORCE: ${{ inputs.force }}
+        INPUT_SKIP_GITHUB: ${{ inputs.skip_github }}
+      run: bash "$GITHUB_ACTION_PATH/action/entrypoint.sh"

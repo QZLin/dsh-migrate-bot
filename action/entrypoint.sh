@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# The Action's entrypoint: run the CLI with the Action inputs (the INPUT_*
-# variables GitHub sets) as arguments. Arguments given to `docker run` are
-# passed through unchanged instead.
+# The composite Action's entrypoint: turn the Action inputs, which the caller
+# passes as INPUT_* variables, into the CLI's arguments. Arguments given to the
+# script are passed through unchanged, so a person can run it by hand.
 set -euo pipefail
 
+app_root="${DSH_MIGRATE_APP_ROOT:-${GITHUB_ACTION_PATH:-}}"
+if [[ -z "$app_root" ]]; then
+  echo 'GITHUB_ACTION_PATH is not set, so the Action cannot locate its own checkout' >&2
+  exit 1
+fi
 workspace="${GITHUB_WORKSPACE:-$PWD}"
+# The consumer checkout is owned by the runner's user, which git does not always
+# trust; the Action only reads and commits inside it.
 git config --global --add safe.directory '*'
-export DSH_MIGRATE_APP_ROOT="${DSH_MIGRATE_APP_ROOT:-/opt/dsh-migrate}"
 export DSH_MIGRATE_HOME="${DSH_MIGRATE_HOME:-$workspace/.dsh-migrate}"
-cli="${DSH_MIGRATE_CLI:-$DSH_MIGRATE_APP_ROOT/dist/src/cli.js}"
+cli="${DSH_MIGRATE_CLI:-$app_root/dist/src/cli.js}"
 
 if [[ $# -gt 0 ]]; then
   exec node "$cli" "$@"
