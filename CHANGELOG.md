@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 Entries are generated from the commit history by [Commitizen](https://commitizen-tools.github.io/commitizen/); do not edit them by hand.
 
+## v2.0.0 (2026-11-16)
+
+### BREAKING CHANGE
+
+- The run command is replaced by bump. Model, review, repair, quota, report, preview and agent-authored end-to-end configuration and outputs are removed. Failed checks now produce draft proposals instead of triggering automatic repair.
+
+### Feat
+
+- **action**: replace model migrations with deterministic version bumps
+
 ## v1.0.0-rc.5 (2026-11-13)
 
 ### Feat

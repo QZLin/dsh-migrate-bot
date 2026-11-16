@@ -1,5 +1,5 @@
 # Copy to .github/workflows/dsh-migrate.yml in the plugin repository, set the
-# cron, and pin the release: `@v1` exists once 1.0.0 is released, and a release
+# cron, and pin the release: `@v2` exists once 2.0.0 is released, and a release
 # candidate is pinned by its tag (docs/operations/release.md). The job lives in
 # the reusable workflow this calls; this file only chooses the triggers.
 # docs/operations/install.md explains every part.
@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   dsh-migrate:
-    uses: royenheart/dsh-migrate-bot/.github/workflows/migrate.yml@v1
+    uses: royenheart/dsh-migrate-bot/.github/workflows/migrate.yml@v2
     with:
       target: ${{ inputs.dsh_release || '' }}
       force: ${{ inputs.bump_again || false }}

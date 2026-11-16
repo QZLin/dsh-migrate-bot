@@ -19,14 +19,14 @@ The tag needs its own push: commitizen creates lightweight tags, which `git push
 
 ## What a consumer pins
 
-A consumer's workflow calls `royenheart/dsh-migrate-bot/.github/workflows/migrate.yml@v1`: the major tag, which moves to every release of that major version, so a breaking change needs a new major version. The major tag exists from the first final release of its version; until then, and to try a release candidate, a consumer pins the candidate's exact tag (`@v1.0.0-rc.1`), which never moves. Releases before 1.0.0 have no reusable workflow.
+A consumer's workflow calls `royenheart/dsh-migrate-bot/.github/workflows/migrate.yml@v2`: the major tag, which moves to every release of that major version, so a breaking change needs a new major version. The major tag exists from the first final release of its version; until then, and to try a release candidate, a consumer pins the candidate's exact tag (`@v2.0.0-rc.1`), which never moves. Releases before 1.0.0 have no reusable workflow.
 
 ## A release candidate
 
 A release candidate is tried on a few consumers before the major tag moves to it:
 
 ```sh
-cz bump --changelog --prerelease rc --prerelease-offset 1   # 1.0.0-rc.1, then rc.2, …
+cz bump --changelog --prerelease rc --prerelease-offset 1   # 2.0.0-rc.1, then rc.2, …
 git push origin HEAD
 git push origin "v$(cat VERSION)"
 ```
