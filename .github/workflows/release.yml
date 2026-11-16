@@ -37,7 +37,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      # The build runs `dsh-migrate print-config`, so an image whose CLI cannot\r?\n      # load fails here and is never pushed.\r?\n      - uses: docker/build-push-action@v6
+      # The build runs `dsh-migrate print-config`, so an image whose CLI cannot
+      # load fails here and is never pushed.
+      - uses: docker/build-push-action@v6
         with:
           context: .
           push: true

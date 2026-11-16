@@ -5,6 +5,7 @@ import { wrappedLines } from '../../scripts/verify-md-wrap.ts'
 import { checkModule, runtimeImports } from '../../scripts/verify-pure-core.ts'
 import { readReleaseFiles, verifyRelease } from '../../scripts/verify-release.ts'
 import { glossaryTerms, verifyTerms } from '../../scripts/verify-terms.ts'
+import { verifyWorkflowSource, verifyWorkflows } from '../../scripts/verify-workflows.ts'
 
 const GLOSSARY = [
   '| Term | Definition | In code | Replaces |',
@@ -64,6 +65,22 @@ test('verify-release rejects an unpinned package manager and a stale pnpm import
   const stale = files.pnpmLock.replace('specifier: ^7.8.5', 'specifier: ^0.0.1')
   assert.deepEqual(verifyRelease({ ...files, pnpmLock: stale }), ['pnpm-lock.yaml dependencies.semver says ^0.0.1, package.json says ^7.8.5'])
   assert.deepEqual(verifyRelease({ ...files, pnpmLock: 'importers: {}\n' }), ['pnpm-lock.yaml must contain a valid root importer'])
+})
+
+test('verify-workflows accepts the repository workflows and reusable jobs', () => {
+  assert.deepEqual(verifyWorkflows(), [])
+  assert.deepEqual(verifyWorkflowSource('on: push\njobs:\n  build:\n    steps:\n      - run: echo ok\n  reuse:\n    uses: owner/repo/.github/workflows/test.yml@v2\n', 'valid.yml'), [])
+})
+
+test('verify-workflows rejects duplicate YAML keys', () => {
+  const source = 'on: push\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n        with: {fetch-depth: 1}\n        with: {fetch-depth: 0}\n'
+  assert.ok(verifyWorkflowSource(source, 'duplicate.yml').some(problem => problem.detail.includes('Map keys must be unique')))
+})
+
+test('verify-workflows rejects missing or conflicting execution steps', () => {
+  assert.ok(verifyWorkflowSource('on: push\njobs:\n  build:\n    steps:\n      - with: {context: .}\n', 'missing.yml').length > 0)
+  assert.ok(verifyWorkflowSource('on: push\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n        run: echo wrong\n', 'both.yml').length > 0)
+  assert.ok(verifyWorkflowSource('on: push\njobs: {}\n', 'empty.yml').length > 0)
 })
 
 test('verify-pure-core reads run-time imports and rejects one with side effects', () => {

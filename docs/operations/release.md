@@ -35,6 +35,8 @@ A pushed `vX.Y.Z-rc.N` tag builds and pushes the image and opens a GitHub prerel
 
 The `release` gate of `pnpm run gates` fails when `VERSION`, `package.json`, `.cz.toml`, the image tag in `action.yml`, the Action version in `migrate.yml` and the newest release in `CHANGELOG.md` do not all state the same version. It also checks that `packageManager` pins pnpm and the root lockfile importer matches the manifest's dependency specifiers.
 
+The `workflows` gate parses every Actions workflow as YAML and validates each job's executable steps or reusable workflow. Duplicate mapping keys and steps without `uses` or `run` fail before a push.
+
 ## Design decisions
 
 - **pnpm is the repository package manager, pinned in the manifest** (*decided*). Why: one package manager and a frozen lockfile make local installs, CI and image builds reproducible. Constraint: the Action is installed, built and tested with pnpm; the root npm lockfile is absent. Consumer checks retain npm's `--before` release cutoff and npm prerelease resolution rules, which the [checks design](../design/checks.md#the-checks) owns; changing the repository toolchain does not change those results. Revisit when: the consumer install policy itself changes.
