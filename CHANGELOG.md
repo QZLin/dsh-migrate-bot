@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 Entries are generated from the commit history by [Commitizen](https://commitizen-tools.github.io/commitizen/); do not edit them by hand.
 
+## v3.0.0 (2026-11-16)
+
+### BREAKING CHANGE
+
+- Consumer runs no longer pull an image. The Action builds itself on the runner, which requires Node, git, bash and npm registry access instead of a container runtime.
+- Consumer runs no longer pull an image. The Action builds itself on the runner, which requires Node, git, bash and npm registry access instead of a container runtime.
+- Consumer runs no longer pull an image. The Action builds itself on the runner, which requires Node, git, bash and npm registry access instead of a container runtime.
+- Consumer runs no longer pull an image. The Action builds itself on the runner, which requires Node, git, bash and npm registry access instead of a container runtime.
+
+### Feat
+
+- **action**: run as a composite Action without a container
+- **action**: run as a composite Action without a container
+- **action**: run as a composite Action without a container
+- **action**: run as a composite Action without a container
+
 ## v2.0.0 (2026-11-16)
 
 ### BREAKING CHANGE
