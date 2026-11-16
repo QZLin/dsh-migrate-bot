@@ -54,9 +54,14 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: 24
+    # The pnpm version has one source: packageManager in this Action's manifest,
+    # which `pnpm/action-setup` cannot read for a path outside the workspace.
+    - id: pnpm
+      shell: bash
+      run: echo "version=$(node -p "require(process.env.GITHUB_ACTION_PATH + '/package.json').packageManager.replace(/^pnpm@/, '')")" >> "$GITHUB_OUTPUT"
     - uses: pnpm/action-setup@v4
       with:
-        package_json_file: ${{ github.action_path }}/package.json
+        version: ${{ steps.pnpm.outputs.version }}
     - shell: bash
       working-directory: ${{ github.action_path }}
       run: pnpm install --frozen-lockfile
