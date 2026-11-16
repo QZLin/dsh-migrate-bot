@@ -1,0 +1,8 @@
+# The configuration the self-test workflow runs the Action with. The fixture
+# plugin has no server half, so the checks that would install a harness release
+# are off; the mechanical check runs the plugin's own test command.
+checks:
+  boot:
+    enabled: false
+  web:
+    enabled: false

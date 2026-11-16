@@ -1,6 +1,6 @@
-# Run this repository's own Action the way a consumer does: `uses: ./` builds
-# the composite Action on a plain runner, with no container runtime and no
-# published image. It is the only check that exercises `action.yml` itself.
+# Run this repository's own Action the way a consumer does: `uses: ./` builds the
+# composite Action on a plain runner, with no container runtime and no published
+# image. It is the only check that exercises `action.yml` itself.
 name: selftest
 
 on:
@@ -16,20 +16,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - id: config
+      # The fixture keeps its own test command, so this proves the Action's
+      # inputs, outputs and mechanical check on a runner without a container.
+      - id: check
         uses: ./
         with:
-          command: print-config
+          command: check
           workdir: fixtures/plugins/typecheck-ok
-      - id: status
-        uses: ./
-        with:
-          command: status
-          workdir: fixtures/plugins/typecheck-ok
-      - name: The Action reports its inputs and outputs
+          config: ../../../.github/dsh-migrate.selftest.yml
+      - name: The Action reports its outputs
         run: |
           set -euo pipefail
-          test -n "${{ steps.status.outputs.status }}"
-          test -n "${{ steps.config.outputs.badge_message }}"
-          echo "status: ${{ steps.status.outputs.status }}"
-          echo "badge: ${{ steps.config.outputs.badge_message }}"
+          test "${{ steps.check.outputs.status }}" = "compatible"
+          test -n "${{ steps.check.outputs.target_tag }}"
+          echo "status: ${{ steps.check.outputs.status }}"
+          echo "target: ${{ steps.check.outputs.target_tag }}"
