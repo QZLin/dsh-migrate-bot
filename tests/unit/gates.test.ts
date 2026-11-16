@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { nonLatinLetters } from '../../scripts/verify-english.ts'
 import { wrappedLines } from '../../scripts/verify-md-wrap.ts'
 import { checkModule, runtimeImports } from '../../scripts/verify-pure-core.ts'
-import { readReleaseFiles, verifyRelease } from '../../scripts/verify-release.ts'
+import { ACTION_REPOSITORY, IMAGE, readReleaseFiles, verifyRelease } from '../../scripts/verify-release.ts'
 import { glossaryTerms, verifyTerms } from '../../scripts/verify-terms.ts'
 import { verifyWorkflowSource, verifyWorkflows } from '../../scripts/verify-workflows.ts'
 
@@ -56,6 +56,16 @@ test('verify-release rejects a file that states another version', () => {
   assert.deepEqual(drifted, [`action.yml image says 0.0.1, VERSION says ${version}`])
   const workflow = verifyRelease({ ...files, migrateYml: files.migrateYml.replace(`dsh-migrate-bot@v${version}`, 'dsh-migrate-bot@v1') })
   assert.deepEqual(workflow, [`migrate.yml uses #1 says 1, VERSION says ${version}`])
+})
+
+test('verify-release rejects upstream references and keeps the GHCR name lowercase', () => {
+  const files = readReleaseFiles()
+  const version = files.version.trim()
+  assert.equal(IMAGE, `ghcr.io/${ACTION_REPOSITORY.toLowerCase()}`)
+  const upstreamImage = files.actionYml.replace(IMAGE, 'ghcr.io/royenheart/dsh-migrate-bot')
+  assert.deepEqual(verifyRelease({ ...files, actionYml: upstreamImage }), [`action.yml image says nothing, VERSION says ${version}`])
+  const upstreamAction = files.migrateYml.replace(`uses: ${ACTION_REPOSITORY}@`, 'uses: royenheart/dsh-migrate-bot@')
+  assert.deepEqual(verifyRelease({ ...files, migrateYml: upstreamAction }), [`migrate.yml says nothing, VERSION says ${version}`])
 })
 
 test('verify-release rejects an unpinned package manager and a stale pnpm importer', () => {

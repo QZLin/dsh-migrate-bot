@@ -44,4 +44,4 @@ runs:
   using: docker
   # Built and published by the release workflow; the version is bumped with the
   # release.
-  image: docker://ghcr.io/royenheart/dsh-migrate-bot:v2.0.0
+  image: docker://ghcr.io/qzlin/dsh-migrate-bot:v2.0.0

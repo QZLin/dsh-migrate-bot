@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   dsh-migrate:
-    uses: royenheart/dsh-migrate-bot/.github/workflows/migrate.yml@v2
+    uses: QZLin/dsh-migrate-bot/.github/workflows/migrate.yml@v2
     with:
       target: ${{ inputs.dsh_release || '' }}
       force: ${{ inputs.bump_again || false }}

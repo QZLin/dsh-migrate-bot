@@ -11,8 +11,8 @@ major_version_zero = false
 version_files = [
     "VERSION",
     "package.json:version",
-    "action.yml:ghcr.io/royenheart/dsh-migrate-bot",
-    ".github/workflows/migrate.yml:royenheart/dsh-migrate-bot@",
+    "action.yml:ghcr.io/qzlin/dsh-migrate-bot",
+    ".github/workflows/migrate.yml:QZLin/dsh-migrate-bot@",
 ]
 
 # `cz_conventional_commits` hardcodes which commit types can reach the

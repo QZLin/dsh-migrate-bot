@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   dsh-migrate:
-    uses: royenheart/dsh-migrate-bot/.github/workflows/migrate.yml@v2
+    uses: QZLin/dsh-migrate-bot/.github/workflows/migrate.yml@v2
     secrets: inherit
 ```
 

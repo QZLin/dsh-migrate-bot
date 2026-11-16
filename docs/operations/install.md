@@ -15,7 +15,7 @@ description: Setting the Action up in a plugin repository: the workflow, the per
 
 The reusable workflow holds the concurrency group that keeps one writer of the state branch at a time, and runs one job, `bump`, on the schedule and on manual dispatch. The caller grants `contents: write` (the proposal branch and the state branch), `issues: write` and `pull-requests: write`. The reusable workflow takes three inputs — `target` and `force` for a manual run, and `config` for a configuration file at another path — and returns the Action's `status`, `target_tag`, `verified_tag` and `pull_request_url` as its outputs.
 
-The Action runs the image `ghcr.io/royenheart/dsh-migrate-bot` of its release, built once per release, so every consumer run uses the same Node and the same system packages.
+The Action runs the image `ghcr.io/qzlin/dsh-migrate-bot` of its release, built once per release, so every consumer run uses the same Node and the same system packages.
 
 The first scheduled run bumps to the target release. When a later run skips a release, and what `force` changes, is in [starting a migration](../design/workflow.md#6-starting-a-migration).
 
@@ -33,6 +33,6 @@ The Action writes `dsh-migrate/state` in the consumer repository: one event log 
 
 A variable the reusable workflow does not map — a proxy, a registry mirror, a `DSH_MIGRATE_HOME` of your own — reaches the Action only through a copy of the reusable workflow in the plugin repository:
 
-1. Copy `.github/workflows/migrate.yml` of the release you would pin to `.github/workflows/dsh-migrate-jobs.yml`, and set each variable in its top-level `env`. For the major tag, that is the release it points to now: the `vX.Y.Z` tag that `git ls-remote --tags https://github.com/royenheart/dsh-migrate-bot` lists with the major tag's commit, never a release candidate.
+1. Copy `.github/workflows/migrate.yml` of the release you would pin to `.github/workflows/dsh-migrate-jobs.yml`, and set each variable in its top-level `env`. For the major tag, that is the release it points to now: the `vX.Y.Z` tag that `git ls-remote --tags https://github.com/QZLin/dsh-migrate-bot` lists with the major tag's commit, never a release candidate.
 2. In the workflow of step 1 above, call `./.github/workflows/dsh-migrate-jobs.yml` instead, still with `secrets: inherit`. The copy runs the release its `uses:` line names, so leave the job as copied.
 3. A major tag moving on no longer upgrades the Action: an upgrade is a new copy of the new release's `migrate.yml`, with the variables set again.

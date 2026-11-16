@@ -11,6 +11,7 @@ A new decision adds an entry to the Design decisions section of its owning docum
 | The event log on the state branch is the only durable state | decided | [Workflow decisions](design/workflow.md#design-decisions) |
 | The checks are keyless and deterministic | decided | [Checks decisions](design/checks.md#design-decisions) |
 | The first failing check ends the pass | decided | [Checks decisions](design/checks.md#design-decisions) |
+| Release artifacts and consumer references belong to this fork | decided | [Release decisions](operations/release.md#design-decisions) |
 | pnpm is the pinned repository package manager; consumer checks retain release-time npm resolution | decided | [Release decisions](operations/release.md#design-decisions) |
 | Documentation is one set of Markdown documents with computed gates, and no generated site | decided | [The tier taxonomy](AGENTS.md#design-decisions) |
 

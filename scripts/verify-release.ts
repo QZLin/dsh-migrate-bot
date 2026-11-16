@@ -12,7 +12,8 @@ import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
 import { readText, REPO_ROOT } from './repo.ts'
 
-export const IMAGE = 'ghcr.io/royenheart/dsh-migrate-bot'
+export const ACTION_REPOSITORY = 'QZLin/dsh-migrate-bot'
+export const IMAGE = `ghcr.io/${ACTION_REPOSITORY.toLowerCase()}`
 
 export interface ReleaseFiles {
   version: string
@@ -31,7 +32,7 @@ export function readReleaseFiles(): ReleaseFiles {
 
 /** The Action version each job of the reusable workflow runs; one unnamed entry when no job names it, which never matches. */
 function migrateUses(migrateYml: string): Array<[string, string | undefined]> {
-  const uses = migrateYml.split('\n').filter(line => line.includes('uses: royenheart/dsh-migrate-bot@'))
+  const uses = migrateYml.split('\n').filter(line => line.includes(`uses: ${ACTION_REPOSITORY}@`))
   return uses.length === 0
     ? [['migrate.yml', undefined]]
     : uses.map((line, index): [string, string | undefined] => [`migrate.yml uses #${String(index + 1)}`, line.split('@v')[1]?.trim()])
