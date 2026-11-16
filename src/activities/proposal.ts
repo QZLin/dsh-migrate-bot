@@ -4,10 +4,8 @@ import { z } from 'zod'
 import { BOT_EMAIL, botEnv, gitOut } from '../git/run.ts'
 import { stageChanges } from '../git/worktree.ts'
 import { slugOf, type GitHubClient, type Repository } from '../github/client.ts'
-import { redactSecrets } from '../agents/session-trace.ts'
-import { formatOfficialDiscussionInvite } from '../github/discussions.ts'
+import { redactSecrets } from '../render/redact.ts'
 import { formatLeftOutWorkflows } from '../github/issue-format.ts'
-import { collectPatchReports, formatPatchReportComment } from '../github/patch-reports.ts'
 import { PROPOSAL_MARKER, type ProposalDocuments } from '../github/templates.ts'
 import type { MigrationContext } from '../workflow/machine.ts'
 import type { MigrationEvent, Proposal } from '../workflow/model.ts'
@@ -16,17 +14,20 @@ import type { MigrationEvent, Proposal } from '../workflow/model.ts'
  * Publish the proposal: one branch, one issue, one pull request per consumer.
  *
  * Every step finds what a previous attempt already created before creating
- * anything: the branch is force-pushed, the issue and the pull request are the
- * inherited ones or the open ones carrying the proposal marker, and the
- * patch-report comments carry a marker per migration. A job that is cancelled
- * after an effect and retried therefore repeats none.
+ * anything: the branch is force-pushed, and the issue and the pull request are
+ * the inherited ones or the open ones carrying the proposal marker. A job that
+ * is cancelled after an effect and retried therefore repeats none.
+ *
+ * A proposal whose checks failed is opened as a draft, so nothing suggests it is
+ * ready to merge; a later migration that fixes the checks reuses the same issue
+ * and pull request and marks it ready.
  *
  * The branch carries the default branch's `.github/workflows/`, as it is when
  * the proposal is pushed. GitHub refuses a push by a token without the
  * `workflows` permission when the branch's workflow files differ from the
- * default branch's, and the default branch can change them while the
- * migration runs. A workflow change the migration made itself is left out the
- * same way, and the proposal says so.
+ * default branch's, and the default branch can change them while the migration
+ * runs. A workflow change the migration made itself is left out the same way,
+ * and the proposal says so.
  */
 
 export const PROPOSAL_BRANCH = 'dsh-migrate/proposal'
@@ -42,8 +43,7 @@ const issueSchema = z.object({
 })
 /** Who may have opened the proposal issue: a bot account, as the Action's token is, or someone the repository trusts. Anyone can write the marker. */
 const TRUSTED_AUTHORS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
-const pullSchema = z.object({ number: z.number(), html_url: z.string() })
-const commentSchema = z.object({ body: z.string().nullable().optional() })
+const pullSchema = z.object({ number: z.number(), html_url: z.string(), node_id: z.string(), draft: z.boolean() })
 
 export interface ProposalDeps {
   workdir: string
@@ -58,6 +58,7 @@ export async function publishProposal(
   deps: ProposalDeps,
   context: MigrationContext,
   rendered: ProposalDocuments,
+  draft: boolean,
 ): Promise<{ event: MigrationEvent; files: Map<string, string> }> {
   const repo = slugOf(deps.repository)
   const { workdir } = deps
@@ -85,20 +86,21 @@ export async function publishProposal(
     pullSchema,
   ))[0]?.number
   const pullLink = pull === undefined
-    ? await deps.github.rest('POST', `/repos/${repo}/pulls`, pullSchema, { title: documents.title, body: pullBody, head: PROPOSAL_BRANCH, base: deps.defaultBranch })
+    ? await deps.github.rest('POST', `/repos/${repo}/pulls`, pullSchema, { title: documents.title, body: pullBody, head: PROPOSAL_BRANCH, base: deps.defaultBranch, draft })
     : await deps.github.rest('PATCH', `/repos/${repo}/pulls/${String(pull)}`, pullSchema, { title: documents.title, body: pullBody, state: 'open' })
-
-  const reports = collectPatchReports(workdir).map(report => ({ ...report, title: redactSecrets(report.title, deps.secrets), body: redactSecrets(report.body, deps.secrets), links: report.links.map(link => redactSecrets(link, deps.secrets)) }))
-  const marker = `<!-- dsh-migrate:patch-reports:${context.input.target.version} -->`
-  const existing = await deps.github.paginate(`/repos/${repo}/issues/${String(issueLink.number)}/comments`, commentSchema)
-  if (!existing.some(comment => comment.body?.includes(marker) === true)) {
-    const bodies = [
-      ...formatPatchReportComment({ reports, pullRequestUrl: pullLink.html_url }),
-      ...reports.filter(report => report.kind === 'draft').map(report => formatOfficialDiscussionInvite({ report })),
-    ]
-    for (const body of bodies) {
-      await deps.github.rest('POST', `/repos/${repo}/issues/${String(issueLink.number)}/comments`, commentSchema, { body: `${marker}\n${body}` })
-    }
+  // REST accepts `draft` only on creation. Reusing a proposal needs the draft
+  // conversion mutation, and its response must confirm the requested state.
+  if (pullLink.draft !== draft) {
+    const mutation = draft ? 'convertPullRequestToDraft' : 'markPullRequestReadyForReview'
+    await deps.github.graphql(
+      `mutation UpdateProposalDraft($id: ID!) {
+        proposal: ${mutation}(input: {pullRequestId: $id}) {
+          pullRequest { isDraft }
+        }
+      }`,
+      { id: pullLink.node_id },
+      z.object({ proposal: z.object({ pullRequest: z.object({ isDraft: z.literal(draft) }) }) }),
+    )
   }
 
   const proposal: Proposal = {
@@ -106,9 +108,9 @@ export async function publishProposal(
     headSha,
     issue: { number: issueLink.number, url: issueLink.html_url },
     pullRequest: { number: pullLink.number, url: pullLink.html_url },
+    draft,
   }
-  const files = new Map(reports.map(report => [`patch-reports/${report.slug}.md`, report.body]))
-  return { event: { type: 'proposal.published', proposal }, files }
+  return { event: { type: 'proposal.published', proposal }, files: new Map() }
 }
 
 /**
@@ -142,8 +144,7 @@ const commitSchema = z.object({
 
 /**
  * Commits on a proposal's pull request that this Action did not author: a
- * newer migration must not force-push over them, and the report counts them as
- * the maintainer's rework.
+ * newer migration must not force-push over them.
  * @param github - a client that can read the consumer repository.
  * @param repository - the consumer repository.
  * @param pullRequest - the proposal's pull request number.

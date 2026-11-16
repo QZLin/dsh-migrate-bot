@@ -1,15 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { nonLatinLetters } from '../../scripts/verify-english.ts'
 import { wrappedLines } from '../../scripts/verify-md-wrap.ts'
-import { verifyPriceTable } from '../../scripts/verify-price-table.ts'
 import { checkModule, runtimeImports } from '../../scripts/verify-pure-core.ts'
 import { readReleaseFiles, verifyRelease } from '../../scripts/verify-release.ts'
-import { verifySkillsPin } from '../../scripts/verify-skills-pin.ts'
 import { glossaryTerms, verifyTerms } from '../../scripts/verify-terms.ts'
-import { REPO_ROOT } from '../../scripts/repo.ts'
 
 const GLOSSARY = [
   '| Term | Definition | In code | Replaces |',
@@ -62,25 +57,19 @@ test('verify-release rejects a file that states another version', () => {
   assert.deepEqual(workflow, [`migrate.yml uses #1 says 1, VERSION says ${version}`])
 })
 
+test('verify-release rejects an unpinned package manager and a stale pnpm importer', () => {
+  const files = readReleaseFiles()
+  const unpinned = { ...JSON.parse(files.packageJson), packageManager: 'pnpm@latest' }
+  assert.deepEqual(verifyRelease({ ...files, packageJson: JSON.stringify(unpinned) }), ['package.json packageManager must pin an exact pnpm version'])
+  const stale = files.pnpmLock.replace('specifier: ^7.8.5', 'specifier: ^0.0.1')
+  assert.deepEqual(verifyRelease({ ...files, pnpmLock: stale }), ['pnpm-lock.yaml dependencies.semver says ^0.0.1, package.json says ^7.8.5'])
+  assert.deepEqual(verifyRelease({ ...files, pnpmLock: 'importers: {}\n' }), ['pnpm-lock.yaml must contain a valid root importer'])
+})
+
 test('verify-pure-core reads run-time imports and rejects one with side effects', () => {
   assert.deepEqual(runtimeImports("import type { A } from '../git/run.ts'\nimport { z } from 'zod'\nexport { b } from './b.ts'\nimport { readFileSync } from 'node:fs'\n"), ['zod', './b.ts', 'node:fs'])
   assert.deepEqual(checkModule('src/workflow/x.ts', "import { readFileSync } from 'node:fs'\nimport { git } from '../git/run.ts'\nimport { compareReleases } from '../domain/release.ts'\nimport { configSchema } from '../config/schema.ts'\n").map(v => v.detail), [
     'imports the package node:fs',
     'imports src/git/run.ts, which is not part of the pure core',
   ])
-})
-
-test('verify-skills-pin rejects an image pin that differs from the submodule', () => {
-  assert.deepEqual(verifySkillsPin('a'.repeat(40), 'a'.repeat(40)).violations, [])
-  assert.equal(verifySkillsPin('a'.repeat(40), 'b'.repeat(40)).violations.length, 1)
-  assert.equal(verifySkillsPin(undefined, 'b'.repeat(40)).violations.length, 1)
-})
-
-test('verify-price-table rejects a data file that drifted from the runtime table', () => {
-  const file = readFileSync(join(REPO_ROOT, 'pricing', 'deepseek.json'), 'utf8')
-  assert.deepEqual(verifyPriceTable(() => file).violations, [])
-  const drifted = JSON.parse(file) as { fetchedAt: string }
-  drifted.fetchedAt = '2000-01-01'
-  assert.equal(verifyPriceTable(() => JSON.stringify(drifted)).violations.length, 1)
-  assert.equal(verifyPriceTable(() => '{').violations.length, 1)
 })

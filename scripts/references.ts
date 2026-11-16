@@ -5,9 +5,6 @@
  *
  * - docs/reference/configuration.md from the configuration schema
  * - docs/reference/workflow.md from the migration statechart
- * - docs/reference/commands.md from the comment command table
- * - docs/reference/metrics.md from the metric library
- * - docs/reference/records.md from the benchmark record schema
  *
  * Without `--write` it lists the documents that differ from the generated
  * text, which is how the `references` gate runs it.
@@ -18,11 +15,8 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { AnyStateNode } from 'xstate'
 import { configSchema } from '../src/config/schema.ts'
-import { checksFor, GUARD_DESCRIPTIONS, migrationMachine, type Scope } from '../src/workflow/machine.ts'
+import { checksFor, GUARD_DESCRIPTIONS, migrationMachine } from '../src/workflow/machine.ts'
 import { migrationEventSchema, type Settings } from '../src/workflow/model.ts'
-import { COMMAND_PREFIX, COMMANDS } from '../src/commands/table.ts'
-import { FORMULA, METRICS } from '../src/evaluation/metrics.ts'
-import { recordSchema, RECORD_SCHEMA } from '../src/evaluation/record.ts'
 import { REPO_ROOT } from './repo.ts'
 
 function page(description: string, title: string, intro: string, body: string[]): string {
@@ -153,12 +147,7 @@ function workflow(): string {
     if (description === undefined) throw new Error(`guard ${guard} has no description in GUARD_DESCRIPTIONS`)
     return `| \`${guard}\` | ${description} |`
   })
-  const everyCheck: Settings = { reviewPolicy: 'always', maxAttempts: 1, e2eFailurePolicy: 'advisory', e2ePublish: true, checks: { cards: true, boot: true, web: true, e2e: true }, publish: true, reportChannels: [] }
-  const scopes: Record<Scope, string> = {
-    initial: 'The unmodified tree, under the `when-checks-fail` review policy.',
-    attempt: 'After the reviews and after each repair attempt.',
-  }
-  const scopeRows = (Object.keys(scopes) as Scope[]).map(scope => `| \`${scope}\` | ${checksFor(scope, everyCheck, false).join(', ') || '—'} | ${scopes[scope]} |`)
+  const everyCheck: Settings = { checks: { boot: true, web: true }, publish: true, ownVersion: true }
   const eventRows = migrationEventSchema.options.map(option => `| \`${String(option.shape.type.value)}\` | ${Object.keys(option.shape).filter(key => key !== 'type').map(key => `\`${key}\``).join(', ')} |`)
   return page(
     'The migration statechart: every state, transition, guard, check pass and event.',
@@ -193,13 +182,9 @@ function workflow(): string {
       '| --- | --- |',
       ...guardRows,
       '',
-      '## Check passes',
+      '## The checks',
       '',
-      'The checks of a pass run in this order and stop at the first failure. A disabled check is left out.',
-      '',
-      '| Scope | Checks | When |',
-      '| --- | --- | --- |',
-      ...scopeRows,
+      `A migration runs ${checksFor(everyCheck).join(', ')}, in that order, and stops at the first failure. A check the consumer turned off is left out.`,
       '',
       '## Events',
       '',
@@ -212,62 +197,11 @@ function workflow(): string {
   )
 }
 
-// ── commands ───────────────────────────────────────────────────────────────
-
-function commands(): string {
-  return page(
-    'The /dsh-migrate comment commands and their flags.',
-    'Comment commands reference',
-    `A commenter the Action admits ([who](../design/workflow.md#9-comment-commands)) runs a command by commenting \`${COMMAND_PREFIX} <verb>\` on a proposal's issue or pull request. ${generatedFrom('src/commands/table.ts')}`,
-    [
-      '| Command | Needs a deploy service | Description |',
-      '| --- | --- | --- |',
-      ...COMMANDS.map(spec => `| \`${COMMAND_PREFIX} ${spec.verb}${spec.flags.map(flag => ` [${flag}]`).join('')}\` | ${spec.needsDeployService ? 'yes' : 'no'} | ${spec.summary} |`),
-    ],
-  )
-}
-
-// ── evaluation ─────────────────────────────────────────────────────────────
-
-function metrics(): string {
-  return page(
-    'Every benchmark metric: its quality, its definition and the conventions all of them share.',
-    'Metrics reference',
-    `The metrics of a benchmark record, formula \`${FORMULA}\`. ${generatedFrom('src/evaluation/metrics.ts')}`,
-    [
-      'Conventions, applied by every metric:',
-      '',
-      '- An *eligible* task is applicable to the subject and feasible in the environment.',
-      '- A *counted* attempt is one on an eligible task whose outcome is `scored` (its reward), `timeout` or `exception` (reward 0). `infrastructure` attempts are not counted; `infrastructureRate` measures them.',
-      '- Suite means weight every task equally: the attempts of a task are averaged first.',
-      '- A metric with an interval reports a 95% percentile bootstrap over tasks, 10,000 resamples with a fixed seed, so a recomputed interval equals the stored one.',
-      '- A metric without its inputs, such as a cost when no attempt reported one, is `null`, never 0.',
-      '',
-      '| Metric | Quality | Interval | Definition |',
-      '| --- | --- | --- | --- |',
-      ...METRICS.map(metric => `| \`${metric.id}\` | ${metric.quality} | ${metric.interval === undefined ? 'no' : 'yes'} | ${metric.description} |`),
-    ],
-  )
-}
-
-function records(): string {
-  const schema = z.toJSONSchema(recordSchema, { io: 'output' }) as JsonSchema
-  return page(
-    `Every field of a benchmark record, schema ${String(RECORD_SCHEMA)}.`,
-    'Benchmark record reference',
-    `A record is \`records/<id>/record.json\` on the \`bench/records\` branch, schema ${String(RECORD_SCHEMA)}, beside the files its attempts kept. ${generatedFrom('src/evaluation/record.ts')}`,
-    ['| Field | Type | Description |', '| --- | --- | --- |', ...configRows(schema, '', false)],
-  )
-}
-
 /** Every reference document, by repository-relative path. */
 export function generateReferences(): Map<string, string> {
   return new Map([
     ['docs/reference/configuration.md', configuration()],
     ['docs/reference/workflow.md', workflow()],
-    ['docs/reference/commands.md', commands()],
-    ['docs/reference/metrics.md', metrics()],
-    ['docs/reference/records.md', records()],
   ])
 }
 

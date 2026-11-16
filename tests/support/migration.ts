@@ -1,6 +1,6 @@
 import { replay, project, type MigrationView, type Projection } from '../../src/workflow/projection.ts'
 import type { MigrationContext } from '../../src/workflow/machine.ts'
-import type { LogEntry, MigrationEvent, MigrationInput, Proposal, Settings } from '../../src/workflow/model.ts'
+import type { BumpChangeEntry, LogEntry, MigrationEvent, MigrationInput, Proposal, Settings } from '../../src/workflow/model.ts'
 
 /**
  * Real machine states for tests, built by replaying a log rather than by
@@ -12,13 +12,9 @@ export const AT = '2026-10-10T00:00:00.000Z'
 
 export function settings(overrides: Partial<Settings> = {}): Settings {
   return {
-    reviewPolicy: 'when-checks-fail',
-    maxAttempts: 2,
-    e2eFailurePolicy: 'advisory',
-    e2ePublish: true,
-    checks: { cards: false, boot: false, web: false, e2e: false },
+    checks: { boot: false, web: false },
     publish: true,
-    reportChannels: [],
+    ownVersion: true,
     ...overrides,
   }
 }
@@ -34,22 +30,48 @@ export function logOf(migrationInput: MigrationInput, events: readonly Migration
   ]
 }
 
-export function proposal(number = 7): Proposal {
+export function proposal(number = 7, draft = false): Proposal {
   return {
     branch: 'dsh-migrate/proposal',
     headSha: 'a'.repeat(40),
     issue: { number: number - 1, url: `https://github.com/acme/plugin/issues/${String(number - 1)}` },
     pullRequest: { number, url: `https://github.com/acme/plugin/pull/${String(number)}` },
+    draft,
   }
 }
 
-/** The events that take the default input to `awaitingMerge` with a proposal. */
+/** One dependency the bump rewrote. */
+export function change(field = 'dependencies.@deepseek-ai/dsh-cli', from = '^0.1.7', to = '^0.2.0'): BumpChangeEntry {
+  return { plugin: '@acme/plugin', file: 'package.json', field, from, to }
+}
+
+export function bumpEvent(changes: readonly BumpChangeEntry[] = [change()]): MigrationEvent {
+  return { type: 'bump.done', changes: [...changes], detail: `${String(changes.length)} field(s) bumped` }
+}
+
+export function passedEvent(check: 'mechanical' | 'boot' | 'web' = 'mechanical'): MigrationEvent {
+  return { type: 'check.done', result: { check, outcome: 'pass', fingerprint: '', detail: '' } }
+}
+
+export function failedEvent(check: 'mechanical' | 'boot' | 'web' = 'mechanical'): MigrationEvent {
+  return { type: 'check.done', result: { check, outcome: 'fail', fingerprint: `${check}: TS2304`, detail: `error TS2304 in ${check}` } }
+}
+
+/** The events that take the default input to `awaitingMerge` with a passing proposal. */
 export function proposedEvents(open: Proposal = proposal()): MigrationEvent[] {
   return [
-    { type: 'check.done', result: { check: 'mechanical', outcome: 'fail', fingerprint: 'mechanical: TS2304', detail: 'error TS2304' } },
-    { type: 'session.done', kind: 'overlap', outcome: 'completed', blocker: 'none', detail: '', report: 'reports/overlap.md' },
-    { type: 'session.done', kind: 'extension-points', outcome: 'completed', blocker: 'none', detail: '', report: 'reports/extension-points.md' },
-    { type: 'check.done', result: { check: 'mechanical', outcome: 'pass', fingerprint: '', detail: '' } },
+    bumpEvent(),
+    passedEvent(),
+    { type: 'tree.inspected', changed: true, files: 2 },
+    { type: 'proposal.published', proposal: open },
+  ]
+}
+
+/** The events that take the default input to `awaitingMerge` with a draft proposal whose check failed. */
+export function draftEvents(open: Proposal = proposal(7, true)): MigrationEvent[] {
+  return [
+    bumpEvent(),
+    failedEvent(),
     { type: 'tree.inspected', changed: true, files: 2 },
     { type: 'proposal.published', proposal: open },
   ]

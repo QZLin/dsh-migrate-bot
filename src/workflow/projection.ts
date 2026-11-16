@@ -95,10 +95,8 @@ export function project(logs: ReadonlyMap<string, readonly LogEntry[]>): Project
   migrations.sort((left, right) => compareReleases(right.target, left.target))
   const processed = migrations.find(view => view.state !== 'error')
   const verified = migrations.find(view => view.state === 'compatible' || view.context.merged)?.target
-  // A proposal is open from its publication: through the end-to-end suite that follows it, the merge wait, and a reporting pass before the merge.
-  const open = migrations.find(view => view.state === 'awaitingMerge'
-    || (view.state === 'publishingE2E' && view.context.concluded === 'awaitingMerge')
-    || (view.state === 'reporting' && !view.context.merged))
+  // A proposal is open from its publication until it is merged, closed or replaced.
+  const open = migrations.find(view => view.state === 'awaitingMerge')
   return {
     migrations,
     ...(processed === undefined ? {} : { processed }),

@@ -8,7 +8,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 
 /** Directory names never scanned, at any depth. */
 export const EXCLUDED_DIRS = new Set([
@@ -27,9 +27,15 @@ export const EXCLUDED_DIRS = new Set([
 /** Third-party files outside `vendor`: the plugins the span suite's tasks are built from, and their authors' migrations (`solution/migration.patch`). */
 export const THIRD_PARTY = /^bench\/tasks\/[^/]+\/(environment\/fixture(\/|$)|solution\/migration\.patch$)/
 
+/** A path with forward slashes, whatever the platform's separator is: every rule here is written that way. */
+export function normalize(path: string): string {
+  return path.split(sep).join('/')
+}
+
 /** Whether a repository-relative path is someone else's file. */
 export function isExcluded(path: string): boolean {
-  return path.split('/').some(segment => EXCLUDED_DIRS.has(segment)) || THIRD_PARTY.test(path)
+  const normalized = normalize(path)
+  return normalized.split('/').some(segment => EXCLUDED_DIRS.has(segment)) || THIRD_PARTY.test(normalized)
 }
 
 /**
@@ -101,8 +107,8 @@ export function isFile(path: string): boolean {
 /**
  * Render a path relative to the repository root, for gate output.
  * @param path - an absolute path.
- * @returns the repository-relative path.
+ * @returns the repository-relative path, with forward slashes.
  */
 export function rel(path: string): string {
-  return relative(REPO_ROOT, path)
+  return normalize(relative(REPO_ROOT, path))
 }

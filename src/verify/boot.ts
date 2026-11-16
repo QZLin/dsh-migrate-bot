@@ -237,9 +237,8 @@ export interface BootProbeOptions {
  * bundle list, so Node resolution finds it exactly as an installed plugin.
  *
  * `patchReload: 'startup'` loads the profile's patches once instead of
- * watching them: a check boots once and exits, so it starts no watcher, as the
- * benchmark suite's verifiers do not either. Releases from 0.2 have no patch
- * watching and ignore the field.
+ * watching them: a check boots once and exits, so it starts no watcher.
+ * Releases from 0.2 have no patch watching and ignore the field.
  * @param home - scratch dsh home
  * @param profile - profile id inside that home
  * @param pluginName - package name of the plugin under test

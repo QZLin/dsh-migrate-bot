@@ -1,5 +1,0 @@
-[submodule "dsh-plugin-upgrade-skill"]
-	path = vendor/dsh-plugin-upgrade-skill
-	url = https://github.com/oh-my-dsh/dsh-plugin-upgrade-skill.git
-	branch = main
-	shallow = true

@@ -1,7 +1,7 @@
 /**
- * An in-memory GitHub REST and GraphQL API for one repository, served through a
- * `fetch` function. It implements only the endpoints this Action calls, with the
- * fields it reads, and records every request.
+ * An in-memory GitHub REST API for one repository, served through a `fetch`
+ * function. It implements only the endpoints this Action calls, with the fields
+ * it reads, and records every request.
  */
 
 export interface FakeIssue {
@@ -19,22 +19,17 @@ export interface FakePull {
   body: string
   state: 'open' | 'closed'
   merged: boolean
+  /** Whether the pull request is a draft, as the Action asked for it. */
+  draft: boolean
   head: { ref: string; sha: string }
   base: string
   commits: Array<{ login: string; email: string }>
-  reviews: Array<{ body: string; user: string; submitted_at: string }>
 }
 
 export class FakeGitHub {
   readonly requests: Array<{ method: string; path: string; body?: unknown }> = []
   readonly issues = new Map<number, FakeIssue>()
   readonly pulls = new Map<number, FakePull>()
-  /** Issues created in other repositories (report channels), by `owner/name`. */
-  readonly external: Array<{ repo: string; title: string; body: string; labels: string[] }> = []
-  readonly discussions: Array<{ title: string; body: string }> = []
-  /** Files changed between two commits, by `base...head`. */
-  readonly comparisons = new Map<string, Array<{ filename: string; status: string; additions: number; deletions: number }>>()
-  searchResults: Array<{ html_url: string; title: string }> = []
   private next = 1
 
   constructor(readonly repo = 'acme/plugin') {}
@@ -59,11 +54,13 @@ export class FakeGitHub {
   private pullJson(pull: FakePull): unknown {
     return {
       number: pull.number,
+      node_id: `PR_${String(pull.number)}`,
       html_url: `https://github.com/${this.repo}/pull/${String(pull.number)}`,
       title: pull.title,
       body: pull.body,
       state: pull.state,
       merged: pull.merged,
+      draft: pull.draft,
       merged_at: pull.merged ? '2026-10-10T01:00:00Z' : null,
       merged_by: pull.merged ? { login: 'maintainer' } : null,
       head: { ref: pull.head.ref, sha: pull.head.sha, repo: { full_name: this.repo } },
@@ -72,7 +69,7 @@ export class FakeGitHub {
 
   addPull(pull: Partial<FakePull> & { head: FakePull['head'] }): FakePull {
     const number = pull.number ?? this.next++
-    const full: FakePull = { number, title: '', body: '', state: 'open', merged: false, base: 'main', commits: [], reviews: [], ...pull }
+    const full: FakePull = { number, title: '', body: '', state: 'open', merged: false, draft: false, base: 'main', commits: [], ...pull }
     this.pulls.set(number, full)
     this.next = Math.max(this.next, number + 1)
     return full
@@ -89,16 +86,18 @@ export class FakeGitHub {
   private route(method: string, url: URL, body: Record<string, unknown> | undefined): Response {
     const own = `/repos/${this.repo}`
     const path = url.pathname
-    const parts = path.split('/')
-    if (path === '/graphql') return this.graphql(body)
-    if (path === '/search/issues') return this.json(200, { items: this.searchResults })
-    if (!path.startsWith(own)) {
-      if (method === 'POST' && parts[4] === 'issues' && parts.length === 5) {
-        this.external.push({ repo: `${parts[2] ?? ''}/${parts[3] ?? ''}`, title: String(body?.title), body: String(body?.body), labels: (body?.labels as string[] | undefined) ?? [] })
-        return this.json(201, { html_url: `https://github.com/${parts[2] ?? ''}/${parts[3] ?? ''}/issues/${String(this.external.length)}` })
+    if (path === '/graphql' && method === 'POST') {
+      const query = typeof body?.query === 'string' ? body.query : ''
+      const variables = body?.variables as { id?: unknown } | undefined
+      const draft = query.includes('convertPullRequestToDraft') ? true : query.includes('markPullRequestReadyForReview') ? false : undefined
+      const pull = [...this.pulls.values()].find(candidate => `PR_${String(candidate.number)}` === variables?.id)
+      if (draft === undefined || pull === undefined || pull.state !== 'open') {
+        return this.json(200, { errors: [{ message: 'invalid draft conversion' }] })
       }
-      return this.json(404, { message: 'Not Found' })
+      pull.draft = draft
+      return this.json(200, { data: { proposal: { pullRequest: { isDraft: pull.draft } } } })
     }
+    if (!path.startsWith(own)) return this.json(404, { message: 'Not Found' })
     const rest = path.slice(own.length)
     const segments = rest.split('/').filter(Boolean)
     const [collection, id, sub] = segments
@@ -115,8 +114,7 @@ export class FakeGitHub {
     if (collection === 'issues' && number !== undefined) {
       const issue = this.issues.get(number)
       if (sub === 'comments') {
-        const comments = issue?.comments ?? this.pulls.get(number)?.reviews.map(review => ({ body: review.body, user: review.user, created_at: review.submitted_at })) ?? []
-        if (method === 'GET') return this.json(200, comments.map(comment => ({ body: comment.body, user: { login: comment.user }, created_at: comment.created_at })))
+        if (method === 'GET') return this.json(200, [])
         const target = issue ?? this.addIssue({ number })
         target.comments.push({ body: String(body?.body), user: 'github-actions[bot]', created_at: '2026-10-10T00:00:00Z' })
         return this.json(201, {})
@@ -131,35 +129,30 @@ export class FakeGitHub {
         const pulls = [...this.pulls.values()].filter(pull => pull.state === 'open' && (head === null || head === `${this.repo.split('/')[0] ?? ''}:${pull.head.ref}`))
         return this.json(200, pulls.map(pull => this.pullJson(pull)))
       }
-      const created = this.addPull({ title: String(body?.title), body: String(body?.body), head: { ref: String(body?.head), sha: 'f'.repeat(40) }, base: String(body?.base) })
+      const created = this.addPull({
+        title: String(body?.title),
+        body: String(body?.body),
+        head: { ref: String(body?.head), sha: 'f'.repeat(40) },
+        base: String(body?.base),
+        draft: body?.draft === true,
+      })
       return this.json(201, this.pullJson(created))
     }
     if (collection === 'pulls' && number !== undefined) {
       const pull = this.pulls.get(number)
       if (pull === undefined) return this.json(404, { message: 'Not Found' })
       if (sub === 'commits') return this.json(200, pull.commits.map(commit => ({ author: { login: commit.login }, commit: { author: { email: commit.email } } })))
-      if (sub === 'reviews') return this.json(200, pull.reviews.map(review => ({ body: review.body, user: { login: review.user }, submitted_at: review.submitted_at })))
       if (sub === 'comments') return this.json(200, [])
-      if (method === 'PATCH') Object.assign(pull, { title: body?.title ?? pull.title, body: body?.body ?? pull.body, state: body?.state ?? pull.state })
+      if (method === 'PATCH') {
+        if (body !== undefined && 'draft' in body) return this.json(422, { message: 'REST cannot update draft state' })
+        Object.assign(pull, {
+          title: body?.title ?? pull.title,
+          body: body?.body ?? pull.body,
+          state: body?.state ?? pull.state,
+        })
+      }
       return this.json(200, this.pullJson(pull))
     }
-    if (collection === 'compare' && id !== undefined) {
-      return this.json(200, { files: this.comparisons.get(segments.slice(1).join('/')) ?? [] })
-    }
     return this.json(404, { message: `no route for ${method} ${path}` })
-  }
-
-  private graphql(body: Record<string, unknown> | undefined): Response {
-    const query = String(body?.query ?? '')
-    const variables = (body?.variables ?? {}) as Record<string, unknown>
-    if (query.includes('search(')) return this.json(200, { data: { search: { nodes: [] } } })
-    if (query.includes('discussionCategories')) {
-      return this.json(200, { data: { repository: { id: 'R_1', discussionCategories: { nodes: [{ id: 'C_ideas', slug: 'ideas' }] } } } })
-    }
-    if (query.includes('createDiscussion')) {
-      this.discussions.push({ title: String(variables.title), body: String(variables.body) })
-      return this.json(200, { data: { createDiscussion: { discussion: { url: `https://github.com/deepseek-ai/deepseek-harness/discussions/${String(this.discussions.length)}` } } } })
-    }
-    return this.json(200, { errors: [{ message: 'unknown query' }] })
   }
 }

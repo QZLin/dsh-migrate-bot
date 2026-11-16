@@ -8,10 +8,9 @@ import { logEntrySchema, type LogEntry } from '../workflow/model.ts'
  * The state branch: the only durable store this Action has.
  *
  * `dsh-migrate/state` in the consumer repository holds one directory per
- * migration (`migrations/<version>/`) with its event log and the review reports
- * a later merge report quotes, plus `badge.json` for the README badge. The
- * branch is written with git plumbing and never checked out, so the plugin
- * working tree is untouched.
+ * migration (`migrations/<version>/`) with its event log, plus `badge.json` for
+ * the README badge. The branch is written with git plumbing and never checked
+ * out, so the plugin working tree is untouched.
  *
  * Writers are serialised by the reusable workflow's concurrency group. A push
  * that still loses a race is rebuilt on the new tip when the other writer

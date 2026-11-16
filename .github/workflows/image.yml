@@ -1,6 +1,5 @@
 # Build the Action's image when what goes into it changes. The build runs the
-# agent runtime self-test, so a runtime that cannot start a session fails here
-# rather than in a consumer's run.
+# CLI, so an image that cannot load fails here rather than in a consumer's run.
 
 name: image
 
@@ -12,7 +11,7 @@ on:
       - src/**
       - tsconfig.json
       - package.json
-      - package-lock.json
+      - pnpm-lock.yaml
   push:
     branches: [main]
     paths:
@@ -21,7 +20,7 @@ on:
       - src/**
       - tsconfig.json
       - package.json
-      - package-lock.json
+      - pnpm-lock.yaml
 
 permissions:
   contents: read

@@ -1,0 +1,6 @@
+# Line endings are part of what this repository ships: the Action's entrypoint is
+# bash, and every gate reads the working tree. Pin them for every platform, so a
+# Windows checkout does not rewrite a file the gates compare byte for byte.
+* text=auto eol=lf
+*.sh text eol=lf
+*.patch binary

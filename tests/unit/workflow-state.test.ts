@@ -2,13 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { decideStart } from '../../src/workflow/start.ts'
 import { badgeOf } from '../../src/workflow/badge.ts'
-import { input, logOf, proposal, proposedEvents, projectionOf, settings } from '../support/migration.ts'
+import { bumpEvent, draftEvents, failedEvent, input, logOf, passedEvent, proposal, proposedEvents, projectionOf } from '../support/migration.ts'
 import type { MigrationEvent } from '../../src/workflow/model.ts'
 
-const compatible: MigrationEvent[] = [
-  { type: 'check.done', result: { check: 'mechanical', outcome: 'pass', fingerprint: '', detail: '' } },
-  { type: 'tree.inspected', changed: false, files: 0 },
-]
+const compatible: MigrationEvent[] = [bumpEvent([]), passedEvent(), { type: 'tree.inspected', changed: false, files: 0 }]
 const merged = (number: number): MigrationEvent => ({ type: 'pull-request.closed', number, merged: true })
 const release = (version: string) => ({ tag: `dsh-v${version}`, version })
 
@@ -62,6 +59,12 @@ test('a proposal with maintainer commits is never taken over', () => {
   assert.equal(decision.action === 'skip' && decision.reason, 'proposal-has-maintainer-commits')
 })
 
+test('a draft proposal stays open until a maintainer closes it', () => {
+  const projection = projectionOf({ '0.2.0': logOf(input('0.2.0'), draftEvents()) })
+  assert.equal(projection.open?.context.proposal?.draft, true)
+  assert.equal(projection.verified, undefined)
+})
+
 test('the badge shows the verified release and what happened to a newer one', () => {
   assert.deepEqual(badgeOf(projectionOf({})), { schemaVersion: 1, label: 'dsh', message: 'unverified', color: 'lightgrey' })
   assert.equal(badgeOf(projectionOf({ '0.2.0': logOf(input('0.2.0'), compatible) })).message, 'dsh-v0.2.0')
@@ -70,32 +73,6 @@ test('the badge shows the verified release and what happened to a newer one', ()
     '0.2.0': logOf(input('0.2.0'), proposedEvents()),
   }))
   assert.deepEqual([proposed.message, proposed.color], ['dsh-v0.1.7 | dsh-v0.2.0 proposed', 'yellow'])
-})
-
-test('the end-to-end suite is published after the proposal, which stays open meanwhile', () => {
-  const withSuite = input('0.2.0', { settings: settings({ checks: { cards: false, boot: false, web: false, e2e: true } }) })
-  const proposed = proposedEvents(proposal(9)).map(event => event.type === 'check.done' && event.result.outcome === 'pass'
-    ? [event, { type: 'check.done' as const, result: { check: 'e2e' as const, outcome: 'pass' as const, fingerprint: '', detail: '' } }]
-    : [event]).flat()
-  const publishing = projectionOf({ '0.2.0': logOf(withSuite, proposed) })
-  assert.equal(publishing.migrations[0]?.state, 'publishingE2E')
-  assert.equal(publishing.open?.context.proposal?.pullRequest.number, 9)
-  const settled = projectionOf({ '0.2.0': logOf(withSuite, [...proposed, { type: 'e2e.published', outcome: 'failed', detail: 'push refused' }]) })
-  assert.equal(settled.migrations[0]?.state, 'awaitingMerge')
-  assert.deepEqual(settled.migrations[0]?.context.warnings, ['end-to-end suite not updated: push refused'])
-  // A merge delivered while the suite is still being published (its job was cut short) is not lost.
-  const mergedMeanwhile = projectionOf({ '0.2.0': logOf(withSuite, [...proposed, { type: 'pull-request.closed', number: 9, merged: true }]) })
-  assert.equal(mergedMeanwhile.migrations[0]?.state, 'accepted')
-  assert.equal(mergedMeanwhile.verified?.version, '0.2.0')
-  // A report command there means the job holding the migrated tree is gone: the report runs, and the suite is given up.
-  const reportedMeanwhile = projectionOf({ '0.2.0': logOf(withSuite, [...proposed, { type: 'command.report', resend: false, comment: 'c1' }]) })
-  assert.equal(reportedMeanwhile.migrations[0]?.state, 'awaitingMerge')
-  assert.match(reportedMeanwhile.migrations[0]?.context.warnings.join('\n') ?? '', /suite may not have been updated: the job that migrated the tree ended/)
-  // So is one delivered while a report before the merge is still being sent.
-  const reported = input('0.2.0', { settings: settings({ reportChannels: ['migrate-bot'] }) })
-  const reporting = [...proposedEvents(proposal(9)), { type: 'command.report' as const, resend: false, comment: 'c1' }]
-  const mergedWhileReporting = projectionOf({ '0.2.0': logOf(reported, [...reporting, { type: 'pull-request.closed', number: 9, merged: true }]) })
-  assert.equal(mergedWhileReporting.migrations[0]?.state, 'reporting')
-  assert.equal(mergedWhileReporting.migrations[0]?.context.merged, true)
-  assert.equal(projectionOf({ '0.2.0': logOf(reported, [...reporting, { type: 'pull-request.closed', number: 9, merged: false }]) }).migrations[0]?.state, 'rejected')
+  const failed = badgeOf(projectionOf({ '0.2.0': logOf(input('0.2.0'), [bumpEvent([]), failedEvent(), { type: 'tree.inspected', changed: false, files: 0 }]) }))
+  assert.deepEqual([failed.message, failed.color], ['unverified | dsh-v0.2.0 failed', 'red'])
 })

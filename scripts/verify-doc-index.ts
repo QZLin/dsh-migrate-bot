@@ -20,7 +20,7 @@
 
 import { dirname, relative, resolve } from 'node:path'
 import { documentAnchors, linksOf, splitTarget } from './md.ts'
-import { isFile, readText, rel, repoFiles, REPO_ROOT } from './repo.ts'
+import { isFile, normalize, readText, rel, repoFiles, REPO_ROOT } from './repo.ts'
 
 /** The index document, relative to the repository root. */
 export const INDEX_PATH = 'docs/index.md'
@@ -119,7 +119,7 @@ export function verifyDocIndex(): { violations: IndexViolation[]; rows: number }
     const { path, fragment } = splitTarget(row.linkUrl)
     // Home cells are repository-root-relative so coverage can be compared as a
     // set, while the link is document-relative so it renders from docs/index.md.
-    const resolved = relative(REPO_ROOT, resolve(REPO_ROOT, dirname(INDEX_PATH), path))
+    const resolved = normalize(relative(REPO_ROOT, resolve(REPO_ROOT, dirname(INDEX_PATH), path)))
     if (resolved !== row.home) {
       violations.push({
         line: row.line,
@@ -147,7 +147,7 @@ export function verifyDocIndex(): { violations: IndexViolation[]; rows: number }
 
   const indexed = new Set(rows.map(row => row.home))
   const expected = [
-    ...repoFiles(['.md'], resolve(REPO_ROOT, 'docs')).map(path => relative(REPO_ROOT, path)),
+    ...repoFiles(['.md'], resolve(REPO_ROOT, 'docs')).map(path => normalize(relative(REPO_ROOT, path))),
     ...REQUIRED_HOMES,
   ].filter(path => path !== INDEX_PATH)
 

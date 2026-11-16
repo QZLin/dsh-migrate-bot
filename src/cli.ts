@@ -1,19 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync, writeSync } from 'node:fs'
+import { writeSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { z } from 'zod'
 import { loadConfigFile, parseConfig } from './config/load.ts'
 import { loadSecrets, secretValues } from './secrets.ts'
-import { createDshRunner, formatSessionProgress } from './agents/dsh.ts'
-import { runSelfTest } from './agents/self-test.ts'
 import { createActivities } from './activities/index.ts'
 import { checkTree } from './activities/check-tree.ts'
 import { maintainerCommits, pullRequestState } from './activities/proposal.ts'
-import { parseCommand, mayRunCommands } from './commands/parse.ts'
-import { runCommand } from './commands/run.ts'
-import { renderCommandHelp } from './commands/table.ts'
-import { openLogStream, type LogStream } from './deploy/log-stream.ts'
 import { declaredRelease, newest } from './domain/release.ts'
 import { defaultBranch, excludeIgnoredPaths } from './git/worktree.ts'
 import { GitHubClient, repositoryOf, slugOf, type Repository } from './github/client.ts'
@@ -21,16 +14,8 @@ import { writeGithubOutput } from './github/output.ts'
 import { resolveTarget } from './github/releases.ts'
 import { renderStepSummary, statusOf, writeStepSummary } from './github/summary.ts'
 import { findPlugins, pluginNames } from './plugins.ts'
-import { resolveChannels } from './merge-reports/channels.ts'
-import { runReportChannel } from './merge-reports/run.ts'
-import { createQuotaQuery } from './quota/query.ts'
 import { inline } from './render/text.ts'
-import { skillsSource, syncUpgradeSkills } from './skills/upgrade.ts'
 import { StateStore } from './state/store.ts'
-import { recorderFor, type RunRecorder } from './observability/recorder.ts'
-import { latestRunId, readInspectData } from './observability/evidence.ts'
-import { publishRunEvidence } from './deploy/evidence.ts'
-import { writeInspectHtml } from './inspect/html.ts'
 import { badgeOf } from './workflow/badge.ts'
 import { InJobEngine } from './engine.ts'
 import { decideStart } from './workflow/start.ts'
@@ -41,21 +26,16 @@ import type { MigrationView } from './workflow/projection.ts'
 const USAGE = `usage: dsh-migrate <command> [options]
 
 commands:
-  run                   start a migration to the target release, or skip it
-  pull-request-closed   deliver a closed pull request: --number N --merged true|false
-  comment               carry out a /dsh-migrate comment: --body --comment-id --author --association --issue
+  bump                  bump the plugins to the target release, check them, and propose the result
   check                 run every check on the working tree against --target
   status                print the consumer state as JSON
-  inspect               write an HTML page for a migration's live run evidence
-                        [--migration VERSION] [--out DIR] [--json]
-  self-test             start one keyless session of the agent runtime
   print-config          print the validated configuration
 
 options:
   --workdir DIR         the plugin checkout (default: the current directory)
   --config FILE         the configuration (default: .github/dsh-migrate.yml when it exists)
-  --target RELEASE      the dsh release to migrate to, instead of the configured one
-  --force               migrate again to a dsh release already migrated to (skipped otherwise),
+  --target RELEASE      the dsh release to bump to, instead of the configured one
+  --force               bump again to a dsh release already processed (skipped otherwise),
                         never while that release's proposal is open
   --skip-github         do not call the GitHub API; what such a run still writes is in the README (Run it locally)
 `
@@ -66,32 +46,20 @@ const OPTIONS = {
   target: { type: 'string' },
   force: { type: 'boolean' },
   'skip-github': { type: 'boolean' },
-  migration: { type: 'string' },
-  out: { type: 'string' },
-  json: { type: 'boolean' },
-  number: { type: 'string' },
-  merged: { type: 'string' },
-  body: { type: 'string' },
-  'comment-id': { type: 'string' },
-  author: { type: 'string' },
-  association: { type: 'string' },
-  issue: { type: 'string' },
 } as const
 
 type Options = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>>['values']
 
-/** Lines go to stdout unbuffered, and to the run log stream when one is open. */
-let stream: LogStream | undefined
+/** Lines go to stdout unbuffered, so the workflow log reads in order. */
 function log(message: string): void {
   writeSync(1, `${message}\n`)
-  stream?.publish(message)
 }
 
 interface Runtime {
   workdir: string
   env: NodeJS.ProcessEnv
   config: MigrateConfig
-  apiKey: string | undefined
+  secrets: readonly string[]
   repository: Repository | undefined
   github: { client: GitHubClient; repository: Repository; defaultBranch: string } | undefined
   store: StateStore
@@ -102,20 +70,21 @@ interface Runtime {
 
 function loadRuntime(options: Options, env: NodeJS.ProcessEnv): Runtime {
   const workdir = resolve(options.workdir ?? '.')
-  const configPath = options.config === undefined ? join(workdir, '.github', 'dsh-migrate.yml') : resolve(workdir, options.config)
+  const defaultConfig = join(workdir, '.github', 'dsh-migrate.yml')
+  const configPath = options.config === undefined ? defaultConfig : resolve(workdir, options.config)
   let config: MigrateConfig
   try {
     config = loadConfigFile(configPath)
   } catch (error) {
-    if (options.config !== undefined || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    if (configPath !== defaultConfig || (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     config = parseConfig({})
   }
   if (options.target !== undefined) config = { ...config, target: options.target }
-  const secrets = loadSecrets([workdir, env.DSH_MIGRATE_APP_ROOT ?? workdir], { apiKeyEnv: config.secrets.apiKeyEnv, env })
+  const loaded = loadSecrets([workdir, env.DSH_MIGRATE_APP_ROOT ?? workdir], { env })
   const repository = env.GITHUB_REPOSITORY === undefined || env.GITHUB_REPOSITORY === '' ? undefined : repositoryOf(env.GITHUB_REPOSITORY)
-  const github = repository === undefined || secrets.githubToken === undefined || options['skip-github'] === true
+  const github = repository === undefined || loaded.githubToken === undefined || options['skip-github'] === true
     ? undefined
-    : { client: new GitHubClient(secrets.githubToken, env), repository, defaultBranch: defaultBranch(workdir) }
+    : { client: new GitHubClient(loaded.githubToken, env), repository, defaultBranch: defaultBranch(workdir) }
   const runId = env.GITHUB_RUN_ID === undefined ? `local-${new Date().toISOString().replace(/[:.]/g, '-')}` : `${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT ?? '1'}`
   const runUrl = env.GITHUB_RUN_ID === undefined || repository === undefined
     ? undefined
@@ -124,7 +93,7 @@ function loadRuntime(options: Options, env: NodeJS.ProcessEnv): Runtime {
     workdir,
     env,
     config,
-    apiKey: secrets.apiKey,
+    secrets: secretValues(env),
     repository,
     github,
     store: new StateStore(workdir, env),
@@ -134,53 +103,24 @@ function loadRuntime(options: Options, env: NodeJS.ProcessEnv): Runtime {
   }
 }
 
-/**
- * Load or unload the upgrade skills for the next session. Only the agent
- * runtime's own home is managed; without `DSH_HOME` nothing is touched.
- */
-function skillsSync(runtime: Runtime): (enabled: boolean) => void {
-  return (enabled) => {
-    const dshHome = runtime.env.DSH_HOME
-    if (dshHome === undefined || dshHome === '') {
-      if (enabled) log('upgrade skills: DSH_HOME is not set, so they are not loaded')
-      return
-    }
-    log(syncUpgradeSkills({ dshHome, enabled, source: skillsSource(runtime.env) }))
-  }
-}
-
-function engineFor(runtime: Runtime, recorder?: RunRecorder): InJobEngine {
-  const agent = createDshRunner({
-    ...(runtime.env.DSH_HOME === undefined ? {} : { dshHome: runtime.env.DSH_HOME }),
-    timeoutMs: runtime.config.timeouts.agentMs,
-    onStatus(progress) { log(`dsh: ${formatSessionProgress(progress)}`) },
-    onLog(line) { log(line) },
-    ...(runtime.config.deploy.trace === 'off' ? {} : { onTrace(line: string) { stream?.publish(`[trace] ${line}`) } }),
-    traceLevel: runtime.config.deploy.trace,
-  })
+function engineFor(runtime: Runtime): InJobEngine {
   const activities = createActivities({
     workdir: runtime.workdir,
     config: runtime.config,
     env: runtime.env,
-    apiKey: runtime.apiKey,
-    agent,
-    quota: runtime.apiKey === undefined ? undefined : createQuotaQuery({ provider: runtime.config.agent.provider }),
     github: runtime.github,
-    files: runtime.store,
     home: runtime.home,
     runId: runtime.runId,
-    runUrl: runtime.runUrl,
-    syncSkills: skillsSync(runtime),
+    ...(runtime.runUrl === undefined ? {} : { runUrl: runtime.runUrl }),
+    secrets: runtime.secrets,
     log,
-    ...(recorder === undefined ? {} : { observer: recorder }),
   })
   return new InJobEngine({
     store: runtime.store,
     activities,
     run: runtime.runId,
-    secrets: secretValues(runtime.config, runtime.env),
+    secrets: runtime.secrets,
     log,
-    onState(state) { stream?.publish(`dsh-migrate-state: ${state}`) },
   })
 }
 
@@ -194,13 +134,9 @@ function migrationInput(runtime: Runtime, target: MigrationInput['target'], veri
     ...(source === undefined ? {} : { source }),
     ...(proposal === undefined ? {} : { proposal }),
     settings: {
-      reviewPolicy: config.review.policy,
-      maxAttempts: config.repair.maxAttempts,
-      e2eFailurePolicy: config.checks.e2e.failurePolicy,
-      e2ePublish: config.checks.e2e.publish,
-      checks: { cards: config.checks.cards.enabled && config.agent.upgradeSkills, boot: config.checks.boot.enabled, web: config.checks.web.enabled, e2e: config.checks.e2e.enabled },
+      checks: { boot: config.checks.boot.enabled, web: config.checks.web.enabled },
       publish: runtime.github !== undefined,
-      reportChannels: resolveChannels(config).filter(channel => channel.enabled).map(channel => channel.id),
+      ownVersion: config.bump.ownVersion,
     },
   }
 }
@@ -211,41 +147,20 @@ function report(runtime: Runtime, engine: InJobEngine, view: MigrationView | und
     ...(view === undefined ? {} : { status: statusOf(view.state), target_tag: view.target.tag, pull_request_url: view.context.proposal?.pullRequest.url }),
     verified_tag: projection.verified?.tag,
     badge_message: badgeOf(projection).message,
-    log_stream_url: stream?.url,
     ...extra,
   }, runtime.env)
-  if (view !== undefined) writeStepSummary(renderStepSummary({ view, pluginName: pluginNames(runtime.workdir), logStreamUrl: stream?.url, ...(typeof extra.run_evidence_url === 'string' ? { evidenceUrl: extra.run_evidence_url } : {}) }), runtime.env)
+  if (view !== undefined) writeStepSummary(renderStepSummary({ view, pluginName: pluginNames(runtime.workdir) }), runtime.env)
 }
 
-async function run(runtime: Runtime, force: boolean): Promise<number> {
-  if (runtime.apiKey === undefined) {
-    process.stderr.write(`${runtime.config.secrets.apiKeyEnv} is not set; a migration needs it for its agent sessions\n`)
-    return 1
-  }
+async function bump(runtime: Runtime, force: boolean): Promise<number> {
   if (findPlugins(runtime.workdir).length === 0) {
     process.stderr.write('the repository holds no plugin: no package.json that declares dsh.bundle, at its root or below it\n')
     writeGithubOutput({ status: 'error' }, runtime.env)
     return 1
   }
-  const selfTest = runSelfTest({ bin: runtime.env.DSH_BIN, dshHome: runtime.env.DSH_HOME })
-  if (!selfTest.ok) {
-    process.stderr.write(`the agent runtime failed its self-test: ${selfTest.detail}\n`)
-    writeGithubOutput({ status: 'error' }, runtime.env)
-    return 1
-  }
   const target = await resolveTarget(runtime.config.target)
-  const recorder = recorderFor({
-    runId: runtime.runId,
-    ...(runtime.runUrl === undefined ? {} : { runUrl: runtime.runUrl }),
-    plugin: findPlugins(runtime.workdir).map(plugin => plugin.name),
-    agent: runtime.config.agent,
-    env: runtime.env,
-    secrets: secretValues(runtime.config, runtime.env),
-    log,
-  })
-  const engine = engineFor(runtime, recorder)
+  const engine = engineFor(runtime)
   await reconcileOpenProposal(runtime, engine)
-  await resumeReporting(runtime, engine)
   const projection = engine.status()
   const proposal = projection.open?.context.proposal
   const decision = decideStart({
@@ -258,85 +173,23 @@ async function run(runtime: Runtime, force: boolean): Promise<number> {
   })
   if (decision.action === 'skip') {
     log(`skipped (${decision.reason}): ${inline(decision.detail, 300)}`)
-    // A reconcile or resume may have run a session with no later migration start.
-    // Persist this run before repairing evidence, so it has a manifest.
-    const observed = engine.status().migrations[0]
-    if (observed !== undefined) {
-      try {
-        await recorder.flush({ store: runtime.store, migrationId: observed.id, runDir: join(runtime.home, 'runs', runtime.runId), view: observed })
-      } catch (error) {
-        log(`manifest: ${inline(error instanceof Error ? error.message : String(error), 300)}`)
-      }
-    }
-    const repairId = projection.migrations[0]?.id ?? projection.open?.id ?? projection.processed?.id
-    if (repairId !== undefined && runtime.config.deploy.enabled) {
-      try {
-        const lastRunId = latestRunId(runtime.store, repairId)
-        if (lastRunId !== undefined) {
-          const startedAt = readInspectData(runtime.store, repairId, lastRunId).runs[0]?.manifest.startedAt
-          const repaired = await publishRunEvidence({
-            config: runtime.config,
-            env: runtime.env,
-            runId: lastRunId,
-            repository: runtime.repository === undefined ? 'unknown' : slugOf(runtime.repository),
-            migrationId: repairId,
-            store: runtime.store,
-            seal: true,
-            sealComplete: false,
-            ...(startedAt === undefined ? {} : { openedAt: startedAt }),
-            log,
-          })
-          if (repaired !== undefined) report(runtime, engine, undefined, { status: 'skipped', target_tag: target.tag, run_evidence_url: repaired })
-          else report(runtime, engine, undefined, { status: 'skipped', target_tag: target.tag })
-        } else report(runtime, engine, undefined, { status: 'skipped', target_tag: target.tag })
-      } catch (error) {
-        log(`run evidence: ${inline(error instanceof Error ? error.message : String(error), 300)}`)
-        report(runtime, engine, undefined, { status: 'skipped', target_tag: target.tag })
-      }
-    } else report(runtime, engine, undefined, { status: 'skipped', target_tag: target.tag })
+    report(runtime, engine, undefined, { status: 'skipped', target_tag: target.tag })
     return 0
   }
   excludeIgnoredPaths(runtime.workdir)
-  stream = await openLogStream({ config: runtime.config, env: runtime.env, repository: runtime.repository === undefined ? 'unknown' : slugOf(runtime.repository), runId: runtime.runId, log })
-  let streamClosed = false
-  try {
-    log(`migrating to ${target.tag}${decision.supersedes === undefined ? '' : `, taking over the proposal of ${decision.supersedes}`}`)
-    const view = await engine.start(target.version, migrationInput(runtime, target, projection.verified, decision.proposal), decision.supersedes)
-    try {
-      await recorder.flush({ store: runtime.store, migrationId: view.id, runDir: join(runtime.home, 'runs', runtime.runId), view })
-    } catch (error) {
-      log(`manifest: ${inline(error instanceof Error ? error.message : String(error), 300)}`)
-    }
-    await stream.close()
-    streamClosed = true
-    let evidenceUrl: string | undefined
-    try {
-      evidenceUrl = await publishRunEvidence({
-        config: runtime.config,
-        env: runtime.env,
-        runId: runtime.runId,
-        repository: runtime.repository === undefined ? 'unknown' : slugOf(runtime.repository),
-        migrationId: view.id,
-        store: runtime.store,
-        seal: runtime.config.deploy.logStream === false || stream.url === undefined,
-        sealComplete: !(runtime.config.deploy.logStream && stream.url === undefined),
-        log,
-      })
-    } catch (error) {
-      log(`run evidence: ${inline(error instanceof Error ? error.message : String(error), 300)}`)
-    }
-    report(runtime, engine, view, evidenceUrl === undefined ? {} : { run_evidence_url: evidenceUrl })
-    return view.state === 'failed' || view.state === 'error' ? 1 : 0
-  } finally {
-    if (!streamClosed) await stream.close()
-  }
+  log(`bumping to ${target.tag}${decision.supersedes === undefined ? '' : `, taking over the proposal of ${decision.supersedes}`}`)
+  const view = await engine.start(target.version, migrationInput(runtime, target, projection.verified, decision.proposal), decision.supersedes)
+  report(runtime, engine, view)
+  // A failed check is reported in the proposal, not repaired; only a run that
+  // concluded nothing at all fails the job.
+  return view.state === 'failed' || view.state === 'error' ? 1 : 0
 }
 
 /**
- * Deliver the close of the open proposal's pull request when its own event
- * never arrived: a job that failed, or one GitHub cancelled while another of
- * the concurrency group waited. Without this a merged proposal would stay
- * open, and the next release would take a closed pull request over.
+ * Deliver the close of the open proposal's pull request when its own event never
+ * arrived: a job that failed, or one GitHub cancelled while another of the
+ * concurrency group waited. Without this a merged proposal would stay open, and
+ * the next release would take a closed pull request over.
  */
 async function reconcileOpenProposal(runtime: Runtime, engine: InJobEngine): Promise<void> {
   const open = engine.status().open
@@ -348,190 +201,6 @@ async function reconcileOpenProposal(runtime: Runtime, engine: InJobEngine): Pro
   await engine.deliver(open.id, { type: 'pull-request.closed', number: pullRequest, merged: state.merged })
 }
 
-/**
- * Finish a reporting pass a cut-short job left: its log keeps the channels
- * still to send, and no other event may ever reach the migration, as after
- * the merge, or with comment commands turned off.
- */
-async function resumeReporting(runtime: Runtime, engine: InJobEngine): Promise<void> {
-  // A report is delivered through GitHub; without it the pass would end in error instead of waiting.
-  if (runtime.github === undefined) return
-  for (const view of engine.status().migrations.filter(migration => migration.state === 'reporting')) {
-    log(`${view.id}: a reporting pass was cut short; sending the rest`)
-    await engine.resume(view.id)
-  }
-}
-
-async function pullRequestClosed(runtime: Runtime, options: Options): Promise<number> {
-  const number = Number(options.number)
-  if (!Number.isInteger(number) || number <= 0 || (options.merged !== 'true' && options.merged !== 'false')) {
-    process.stderr.write('pull-request-closed needs --number N and --merged true|false\n')
-    return 2
-  }
-  const recorder = recorderFor({
-    runId: runtime.runId,
-    ...(runtime.runUrl === undefined ? {} : { runUrl: runtime.runUrl }),
-    plugin: findPlugins(runtime.workdir).map(plugin => plugin.name),
-    agent: runtime.config.agent,
-    env: runtime.env,
-    secrets: secretValues(runtime.config, runtime.env),
-    log,
-  })
-  const engine = engineFor(runtime, recorder)
-  // The open proposal first: an older migration whose proposal a newer one took over carries the same number.
-  const projection = engine.status()
-  const migration = projection.open?.context.proposal?.pullRequest.number === number
-    ? projection.open
-    : projection.migrations.find(view => view.context.proposal?.pullRequest.number === number)
-  if (migration === undefined) {
-    log(`pull request #${String(number)} is not a proposal of this Action; nothing to do`)
-    return 0
-  }
-  const view = await engine.deliver(migration.id, { type: 'pull-request.closed', number, merged: options.merged === 'true' })
-  try {
-    await recorder.flush({ store: runtime.store, migrationId: view.id, runDir: join(runtime.home, 'runs', runtime.runId), view })
-  } catch (error) {
-    log(`manifest: ${inline(error instanceof Error ? error.message : String(error), 300)}`)
-  }
-  let evidenceUrl: string | undefined
-  try {
-    evidenceUrl = await publishRunEvidence({
-      config: runtime.config,
-      env: runtime.env,
-      runId: runtime.runId,
-      repository: runtime.repository === undefined ? 'unknown' : slugOf(runtime.repository),
-      migrationId: view.id,
-      store: runtime.store,
-      seal: true,
-      log,
-    })
-  } catch (error) {
-    log(`run evidence: ${inline(error instanceof Error ? error.message : String(error), 300)}`)
-  }
-  report(runtime, engine, view, evidenceUrl === undefined ? {} : { run_evidence_url: evidenceUrl })
-  return view.state === 'error' ? 1 : 0
-}
-
-async function comment(runtime: Runtime, options: Options): Promise<number> {
-  const parsed = parseCommand(options.body ?? '')
-  if (!parsed.ok && parsed.reason === 'no command') return 0
-  const issueNumber = options.issue === undefined ? undefined : Number(options.issue)
-  const commentId = options['comment-id']
-  if (commentId === undefined || (issueNumber !== undefined && (!Number.isInteger(issueNumber) || issueNumber <= 0))) {
-    process.stderr.write('comment needs --comment-id and a positive --issue\n')
-    return 2
-  }
-  let reply: string
-  if (!mayRunCommands({ authorAssociation: options.association, authorLogin: options.author })) {
-    reply = '**`/dsh-migrate` is refused for this account.** Commands are limited to the owners, members and collaborators of this repository.'
-  } else if (!parsed.ok) {
-    reply = parsed.reason === 'help' ? renderCommandHelp() : parsed.reason
-  } else if (!runtime.config.deploy.commands) {
-    reply = '**Commands are disabled** by `deploy.commands: false`.'
-  } else {
-    const engine = engineFor(runtime)
-    const agent = createDshRunner({ timeoutMs: runtime.config.timeouts.agentMs, onLog: log, traceLevel: 'off' })
-    const outcome = await runCommand({
-      command: parsed.command,
-      config: runtime.config,
-      env: runtime.env,
-      workdir: runtime.workdir,
-      repository: runtime.repository,
-      github: runtime.github?.client,
-      issueNumber,
-      commentId,
-      log,
-      status: () => engine.status(),
-      report: async (migration, resend) => await engine.deliver(migration, { type: 'command.report', resend, comment: commentId }),
-      reportDryRun: async (migration) => {
-        const github = runtime.github
-        if (github === undefined) throw new Error('a dry run reads the proposal from GitHub and needs GITHUB_TOKEN')
-        const results = []
-        for (const channel of migration.context.input.settings.reportChannels) {
-          results.push({
-            channel,
-            result: await runReportChannel(channel, migration, {
-              config: runtime.config,
-              env: runtime.env,
-              repository: github.repository,
-              github: github.client,
-              files: runtime.store,
-              agent,
-              apiKey: runtime.apiKey,
-              workdir: runtime.workdir,
-              syncSkills: skillsSync(runtime),
-            }, 'dry-run'),
-          })
-        }
-        return results
-      },
-      checkTree: async (tree, migration) => await checkTree(
-        tree,
-        migration?.target ?? await resolveTarget(runtime.config.target),
-        { config: runtime.config, cacheDir: join(runtime.home, 'dsh'), runDir: join(runtime.home, 'runs', runtime.runId) },
-      ),
-      treeDir: join(runtime.home, 'publish-tree'),
-    })
-    reply = outcome.reply
-  }
-  log(reply)
-  writeGithubOutput({ command_reply: reply }, runtime.env)
-  if (runtime.github !== undefined && issueNumber !== undefined) await postReply(runtime.github.client, runtime.github.repository, issueNumber, commentId, reply)
-  return 0
-}
-
-/** Post the reply once per comment, however many times the comment is delivered. */
-async function postReply(github: GitHubClient, repository: Repository, issue: number, commentId: string, reply: string): Promise<void> {
-  const marker = `<!-- dsh-migrate:reply-to=${commentId} -->`
-  const path = `/repos/${slugOf(repository)}/issues/${String(issue)}/comments`
-  const existing = await github.paginate(path, z.object({ body: z.string().nullable().optional() }))
-  if (existing.some(entry => entry.body?.includes(marker) === true)) {
-    log(`a reply to comment ${commentId} already exists; not posting another`)
-    return
-  }
-  await github.rest('POST', path, z.object({}), { body: `${marker}\n${reply}` })
-}
-
-interface InspectRuntime {
-  workdir: string
-  home: string
-  store: StateStore
-}
-
-/** Inspect reads only the state branch; a broken consumer config or secret file must not block it. */
-function inspectRuntime(values: Options, env: NodeJS.ProcessEnv): InspectRuntime {
-  const workdir = resolve(values.workdir ?? process.cwd())
-  return {
-    workdir,
-    home: resolve(env.DSH_MIGRATE_HOME ?? join(workdir, '.dsh-migrate')),
-    store: new StateStore(workdir, env),
-  }
-}
-
-async function inspect(runtime: InspectRuntime, options: Options): Promise<number> {
-  try {
-    runtime.store.refresh()
-    const data = readInspectData(runtime.store, options.migration)
-    if (options.out === '') throw new Error('--out needs a directory')
-    const out = options.out === undefined ? join(runtime.home, 'inspect') : resolve(runtime.workdir, options.out)
-    if (options.json === true) {
-      mkdirSync(out, { recursive: true })
-      const path = join(out, 'inspect.json')
-      writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`)
-      log(`inspect: ${data.migrationId}: ${String(data.runs.length)} run(s), ${String(data.runs.reduce((sum, run) => sum + run.manifest.sessions.length, 0))} session(s)`)
-      log(path)
-      return 0
-    }
-    const path = writeInspectHtml(data, out)
-    log(`inspect: ${data.migrationId}: ${String(data.runs.length)} run(s), ${String(data.runs.reduce((sum, run) => sum + run.manifest.sessions.length, 0))} session(s)`)
-    log(path)
-    return 0
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-    return 1
-  }
-}
-
 async function check(runtime: Runtime): Promise<number> {
   const target = await resolveTarget(runtime.config.target)
   excludeIgnoredPaths(runtime.workdir)
@@ -539,6 +208,7 @@ async function check(runtime: Runtime): Promise<number> {
     config: runtime.config,
     cacheDir: join(runtime.home, 'dsh'),
     runDir: join(runtime.home, 'runs', runtime.runId),
+    secrets: runtime.secrets,
   })
   for (const result of report.results) log(`${result.check}: ${result.outcome}${result.outcome === 'fail' ? ` (${inline(result.fingerprint, 200)})` : ''}`)
   log(`checks against ${target.tag}: ${report.ok ? 'pass' : `fail: ${report.detail}`}`)
@@ -551,27 +221,16 @@ async function main(argv: readonly string[]): Promise<number> {
   const command = positionals[0]
   const env = process.env
   switch (command) {
-    case 'self-test': {
-      const result = runSelfTest({ bin: env.DSH_BIN, dshHome: env.DSH_HOME })
-      log(`self-test: ${result.ok ? 'pass' : 'fail'}: ${result.detail}`)
-      return result.ok ? 0 : 1
-    }
     case 'print-config':
       log(JSON.stringify(loadRuntime(values, env).config, null, 2))
       return 0
     case 'status':
       log(JSON.stringify(engineFor(loadRuntime(values, env)).status(), null, 2))
       return 0
-    case 'run':
-      return await run(loadRuntime(values, env), values.force === true)
-    case 'pull-request-closed':
-      return await pullRequestClosed(loadRuntime(values, env), values)
-    case 'comment':
-      return await comment(loadRuntime(values, env), values)
+    case 'bump':
+      return await bump(loadRuntime(values, env), values.force === true)
     case 'check':
       return await check(loadRuntime(values, env))
-    case 'inspect':
-      return await inspect(inspectRuntime(values, env), values)
     default:
       process.stderr.write(USAGE)
       return 2

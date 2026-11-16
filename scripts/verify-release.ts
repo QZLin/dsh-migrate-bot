@@ -1,14 +1,15 @@
 /**
  * Gate: every file that states the release version states the same one.
  *
- * Commitizen bumps `VERSION`, `package.json`, `package-lock.json` and
- * `.cz.toml` together and writes the changelog section; the image the Action
- * runs is tagged with that version in `action.yml`, and the reusable workflow
- * runs the Action of that version. A hand edit to any one of them would ship
- * an Action whose code, image or workflow disagree.
+ * Commitizen bumps `VERSION`, `package.json` and `.cz.toml` together and writes
+ * the changelog section; the image and the reusable workflow name that release.
+ * The pnpm lockfile stores dependency resolutions, not the Action's version,
+ * so its root importer is checked against the manifest's dependency specifiers.
  */
 
 import { join } from 'node:path'
+import { parse as parseYaml } from 'yaml'
+import { z } from 'zod'
 import { readText, REPO_ROOT } from './repo.ts'
 
 export const IMAGE = 'ghcr.io/royenheart/dsh-migrate-bot'
@@ -16,7 +17,7 @@ export const IMAGE = 'ghcr.io/royenheart/dsh-migrate-bot'
 export interface ReleaseFiles {
   version: string
   packageJson: string
-  packageLock: string
+  pnpmLock: string
   czToml: string
   actionYml: string
   migrateYml: string
@@ -25,7 +26,7 @@ export interface ReleaseFiles {
 
 export function readReleaseFiles(): ReleaseFiles {
   const read = (name: string): string => readText(join(REPO_ROOT, name))
-  return { version: read('VERSION'), packageJson: read('package.json'), packageLock: read('package-lock.json'), czToml: read('.cz.toml'), actionYml: read('action.yml'), migrateYml: read('.github/workflows/migrate.yml'), changelog: read('CHANGELOG.md') }
+  return { version: read('VERSION'), packageJson: read('package.json'), pnpmLock: read('pnpm-lock.yaml'), czToml: read('.cz.toml'), actionYml: read('action.yml'), migrateYml: read('.github/workflows/migrate.yml'), changelog: read('CHANGELOG.md') }
 }
 
 /** The Action version each job of the reusable workflow runs; one unnamed entry when no job names it, which never matches. */
@@ -36,18 +37,54 @@ function migrateUses(migrateYml: string): Array<[string, string | undefined]> {
     : uses.map((line, index): [string, string | undefined] => [`migrate.yml uses #${String(index + 1)}`, line.split('@v')[1]?.trim()])
 }
 
-/** Each statement of the version that differs from `VERSION`. */
+const manifestSchema = z.object({
+  version: z.string(),
+  packageManager: z.string().optional(),
+  dependencies: z.record(z.string(), z.string()).default({}),
+  devDependencies: z.record(z.string(), z.string()).default({}),
+  optionalDependencies: z.record(z.string(), z.string()).default({}),
+})
+
+const lockedDependencies = z.record(z.string(), z.object({ specifier: z.string() })).default({})
+const lockSchema = z.object({
+  importers: z.object({
+    '.': z.object({
+      dependencies: lockedDependencies,
+      devDependencies: lockedDependencies,
+      optionalDependencies: lockedDependencies,
+    }),
+  }),
+})
+
+/** Version statements and root dependency specifiers that differ from their source. */
 export function verifyRelease(files: ReleaseFiles): string[] {
   const version = files.version.trim()
-  const lock = JSON.parse(files.packageLock) as { version?: string; packages?: Record<string, { version?: string }> }
+  const manifest = manifestSchema.parse(JSON.parse(files.packageJson))
   const stated: Array<[string, string | undefined]> = [
-    ['package.json', (JSON.parse(files.packageJson) as { version?: string }).version],
-    ['package-lock.json', lock.version],
-    ['package-lock.json packages[""]', lock.packages?.['']?.version],
+    ['package.json', manifest.version],
     ['.cz.toml', files.czToml.split('\n').find(line => line.startsWith('version = '))?.split('"')[1]],
     ['action.yml image', files.actionYml.split('\n').find(line => line.includes(`docker://${IMAGE}:`))?.split(`${IMAGE}:v`)[1]?.trim()],
     ...migrateUses(files.migrateYml),
     ['CHANGELOG.md newest release', files.changelog.split('\n').find(line => line.startsWith('## v'))?.slice(4).split(' ')[0]],
   ]
-  return stated.flatMap(([where, value]) => value === version ? [] : [`${where} says ${value ?? 'nothing'}, VERSION says ${version}`])
+  const problems = stated.flatMap(([where, value]) => value === version ? [] : [`${where} says ${value ?? 'nothing'}, VERSION says ${version}`])
+  if (manifest.packageManager === undefined || !/^pnpm@\d+\.\d+\.\d+$/.test(manifest.packageManager)) {
+    problems.push('package.json packageManager must pin an exact pnpm version')
+  }
+  try {
+    const lock = lockSchema.parse(parseYaml(files.pnpmLock)).importers['.']
+    for (const block of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
+      const names = new Set([...Object.keys(manifest[block]), ...Object.keys(lock[block])])
+      for (const name of [...names].sort()) {
+        const declared = manifest[block][name]
+        const locked = lock[block][name]?.specifier
+        if (locked !== declared) {
+          problems.push(`pnpm-lock.yaml ${block}.${name} says ${locked ?? 'nothing'}, package.json says ${declared ?? 'nothing'}`)
+        }
+      }
+    }
+  } catch {
+    problems.push('pnpm-lock.yaml must contain a valid root importer')
+  }
+  return problems
 }

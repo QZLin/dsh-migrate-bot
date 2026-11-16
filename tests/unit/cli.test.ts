@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 import { appRootFrom } from '../../src/paths.ts'
 import { logPath, serializeLog, StateStore } from '../../src/state/store.ts'
 import { checkout } from '../support/repository.ts'
-import { input, logOf, proposal, proposedEvents } from '../support/migration.ts'
+import { input, logOf, proposedEvents } from '../support/migration.ts'
 
 const CLI = join(appRootFrom(import.meta.url), 'dist', 'src', 'cli.js')
 
@@ -20,7 +20,7 @@ function cli(args: string[], cwd: string, env: Record<string, string> = {}): { s
   return { status: result.status, stdout: result.stdout, stderr: result.stderr, output: readFileSync(output, 'utf8') }
 }
 
-const CONFIG = 'checks:\n  boot:\n    enabled: false\n  web:\n    enabled: false\n  e2e:\n    enabled: false\ntests:\n  commands:\n    - "true"\n'
+const CONFIG = 'checks:\n  boot:\n    enabled: false\n  web:\n    enabled: false\ntests:\n  commands:\n    - "true"\n'
 
 function plugin() {
   const repo = checkout({
@@ -44,22 +44,37 @@ test('an unknown command prints the usage and exits 2', () => {
   }
 })
 
-test('print-config shows the validated configuration, and an invalid one is refused', () => {
+test('print-config shows the validated configuration, and a model-driven one is refused with the reason', () => {
   const repo = plugin()
   try {
     const shown = cli(['print-config'], repo.work)
     assert.equal(shown.status, 0)
     assert.equal(JSON.parse(shown.stdout).checks.boot.enabled, false)
-    writeFileSync(join(repo.work, '.github', 'dsh-migrate.yml'), 'loop:\n  maxAttempts: 2\n')
+    writeFileSync(join(repo.work, '.github', 'dsh-migrate.yml'), 'agent:\n  model: deepseek-v4-flash\n')
     const refused = cli(['print-config'], repo.work)
     assert.equal(refused.status, 1)
-    assert.match(refused.stderr, /loop was renamed to `repair`/)
+    assert.match(refused.stderr, /agent was removed; a migration runs no model/)
   } finally {
     repo.cleanup()
   }
 })
 
-test('check runs every enabled check against the named release without a key', () => {
+test('the default Action config path is optional, but a missing custom config is refused', () => {
+  const repo = checkout()
+  try {
+    const defaults = cli(['print-config', '--config', '.github/dsh-migrate.yml'], repo.work)
+    assert.equal(defaults.status, 0, defaults.stderr)
+    assert.equal(JSON.parse(defaults.stdout).target, 'latest')
+    assert.equal(JSON.parse(defaults.stdout).bump.ownVersion, true)
+    const custom = cli(['print-config', '--config', 'missing.yml'], repo.work)
+    assert.equal(custom.status, 1)
+    assert.match(custom.stderr, /ENOENT/)
+  } finally {
+    repo.cleanup()
+  }
+})
+
+test('check runs every enabled check against the named release', () => {
   const repo = plugin()
   try {
     const result = cli(['check', '--target', '0.2.0'], repo.work)
@@ -75,7 +90,7 @@ test('check runs every enabled check against the named release without a key', (
 test('status prints the state the branch holds', () => {
   const repo = plugin()
   try {
-    new StateStore(repo.work).write(undefined, new Map([[logPath('0.2.0'), serializeLog(logOf(input('0.2.0'), proposedEvents(proposal(9))))]]), 'seed')
+    new StateStore(repo.work).write(undefined, new Map([[logPath('0.2.0'), serializeLog(logOf(input('0.2.0'), proposedEvents()))]]), 'seed')
     const result = cli(['status'], repo.work)
     assert.equal(result.status, 0)
     const status = JSON.parse(result.stdout) as { open?: { id: string } }
@@ -85,51 +100,14 @@ test('status prints the state the branch holds', () => {
   }
 })
 
-test('a closed pull request that is no proposal of this Action changes nothing', () => {
-  const repo = plugin()
-  try {
-    const result = cli(['pull-request-closed', '--number', '5', '--merged', 'true'], repo.work)
-    assert.equal(result.status, 0)
-    assert.match(result.stdout, /pull request #5 is not a proposal of this Action/)
-    assert.equal(cli(['pull-request-closed', '--number', 'x', '--merged', 'true'], repo.work).status, 2)
-  } finally {
-    repo.cleanup()
-  }
-})
-
-test('a run without the API key stops before anything else', () => {
-  const repo = plugin()
-  try {
-    const result = cli(['run'], repo.work)
-    assert.equal(result.status, 1)
-    assert.match(result.stderr, /DEEPSEEK_API_KEY_DSH_MIGRATE_BOT is not set/)
-  } finally {
-    repo.cleanup()
-  }
-})
-
-test('a run stops with the reason when the repository root holds no plugin', () => {
+test('a bump stops with the reason when the repository root holds no plugin', () => {
   const repo = checkout({ 'README.md': '# plugins live in subdirectories\n' })
   try {
-    const result = cli(['run'], repo.work, { DEEPSEEK_API_KEY_DSH_MIGRATE_BOT: 'sk-test' })
+    const result = cli(['bump'], repo.work)
     assert.equal(result.status, 1)
     assert.match(result.stderr, /the repository holds no plugin/)
     assert.match(result.output, /status/)
     assert.match(result.output, /error/)
-  } finally {
-    repo.cleanup()
-  }
-})
-
-test('a comment without a command is ignored, and a refused commenter is told', () => {
-  const repo = plugin()
-  try {
-    const ignored = cli(['comment', '--body', 'thanks!', '--comment-id', '1', '--issue', '9'], repo.work)
-    assert.deepEqual([ignored.status, ignored.stdout], [0, ''])
-    const refused = cli(['comment', '--body', '/dsh-migrate status', '--comment-id', '2', '--issue', '9', '--association', 'NONE', '--author', 'stranger'], repo.work)
-    assert.equal(refused.status, 0)
-    assert.match(refused.stdout, /is refused for this account/)
-    assert.match(refused.output, /command_reply=/)
   } finally {
     repo.cleanup()
   }

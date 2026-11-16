@@ -1,9 +1,10 @@
 {
   "name": "@royenheart/dsh-migrate-action",
   "version": "1.0.0-rc.5",
-  "description": "Containerized GitHub Action that migrates third-party DeepSeek Harness plugins across harness releases.",
+  "description": "Containerized GitHub Action that raises third-party DeepSeek Harness plugins to new harness releases and runs their checks; no model is consulted.",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@11.28.5",
   "bin": {
     "dsh-migrate": "./dist/src/cli.js"
   },
@@ -18,16 +19,11 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/tests/unit/*.test.js dist/tests/integration/*.test.js dist/tests/e2e/mechanical.test.js",
-    "test:e2e": "npm run build && node --test dist/tests/e2e/*.test.js",
-    "gates": "npm run build && node dist/scripts/run-gates.js",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test dist/tests/unit/*.test.js dist/tests/integration/*.test.js dist/tests/e2e/mechanical.test.js",
+    "gates": "pnpm run build && node dist/scripts/run-gates.js",
     "commit": "cz commit",
-    "bump": "cz bump --changelog",
-    "bench": "npm run build && node dist/scripts/bench.js",
-    "site": "npm run build && node dist/scripts/site.js",
-    "deploy-service:build": "npm --prefix deploy-service ci && npm --prefix deploy-service run build",
-    "deploy-service:test": "npm --prefix deploy-service test"
+    "bump": "cz bump --changelog"
   },
   "dependencies": {
     "semver": "^7.8.5",

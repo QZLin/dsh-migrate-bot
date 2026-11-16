@@ -9,50 +9,27 @@ The entry point to the documentation: `AGENTS.md` holds the rules and links here
 | The product, its inputs and outputs, and how to consume the Action | `README.md` | [What it does](../README.md#what-it-does) |
 | Where to start as a contributor, and what to run before pushing | `README.md` | [Contributing](../README.md#contributing) |
 | Running the Action locally, and what a run without GitHub still writes | `README.md` | [Run it locally](../README.md#run-it-locally) |
-| Installing the Action: secrets, the workflow, permissions, report channels, the deploy service | `docs/operations/install.md` | [The workflow](operations/install.md#the-workflow) |
-| Setting the Action up in a plugin repository with a coding agent: what it looks up, what it asks, what it never does | `docs/operations/install.md` | [Setting it up with an agent](operations/install.md#setting-it-up-with-an-agent) |
-| Moving a plugin repository from the v0 Action: the workflow, the secrets, the configuration, the branches | `docs/operations/install.md` | [Moving from v0](operations/install.md#moving-from-v0) |
-| A copy of the reusable workflow, for a variable name or a report channel of your own | `docs/operations/install.md` | [A copy of the reusable workflow](operations/install.md#a-copy-of-the-reusable-workflow) |
-| What the spend cap counts, and which sessions it does not | `docs/operations/install.md` | [Spend](operations/install.md#spend) |
+| Installing the Action: the workflow, the permissions, the configuration file | `docs/operations/install.md` | [The workflow](operations/install.md#the-workflow) |
+| What the proposal is, and what a maintainer does with a draft | `docs/operations/install.md` | [The proposal](operations/install.md#the-proposal) |
+| What the state branch stores, and what a run without GitHub still writes | `docs/operations/install.md` | [The state branch](operations/install.md#the-state-branch) |
+| A copy of the reusable workflow, for a variable of your own | `docs/operations/install.md` | [A copy of the reusable workflow](operations/install.md#a-copy-of-the-reusable-workflow) |
 | Releasing the Action | `docs/operations/release.md` | [Releasing](operations/release.md#releasing) |
 | Which tag a consumer pins, and release candidates | `docs/operations/release.md` | [What a consumer pins](operations/release.md#what-a-consumer-pins) |
 | How a migration runs as a statechart over an event log, and why | `docs/design/workflow.md` | [Decisions](design/workflow.md#1-decisions) |
+| The states of a migration and what each one does | `docs/design/workflow.md` | [The shape](design/workflow.md#2-the-shape) |
 | The invariants the workflow keeps, and the tests that hold them | `docs/design/workflow.md` | [Invariants](design/workflow.md#3-invariants) |
 | What the state branch stores, and what is derived from it | `docs/design/workflow.md` | [The state branch](design/workflow.md#4-the-state-branch) |
-| When a run starts, skips or takes over a migration, and what it catches up first | `docs/design/workflow.md` | [Starting a migration](design/workflow.md#6-starting-a-migration) |
-| Merge reports: the channels, their evidence, and why each needs a token | `docs/design/workflow.md` | [Merge reports](design/workflow.md#8-merge-reports) |
-| Who may run a comment command, and how a repeated delivery is handled | `docs/design/workflow.md` | [Comment commands](design/workflow.md#9-comment-commands) |
+| What the proposal is, and how a retry finds what an attempt created | `docs/design/workflow.md` | [What a consumer sees](design/workflow.md#5-what-a-consumer-sees) |
+| When a run starts, skips or takes over a migration | `docs/design/workflow.md` | [Starting a migration](design/workflow.md#6-starting-a-migration) |
+| What happens to a failing check, and why nothing is repaired | `docs/design/workflow.md` | [Reporting a failure](design/workflow.md#7-reporting-a-failure) |
+| The three checks, what each one runs, and what a check may read | `docs/design/checks.md` | [The checks](design/checks.md#the-checks) |
+| Why the checks are keyless, and what that bounds | `docs/design/checks.md` | [What a check may read](design/checks.md#what-a-check-may-read) |
 | Every state, transition and guard of the migration statechart | `docs/reference/workflow.md` | [States](reference/workflow.md#states) |
-| The comment commands | `docs/reference/commands.md` | [Comment commands reference](reference/commands.md#comment-commands-reference) |
-| The five checks, the change-card ledger, the end-to-end suite and its baseline, and watchdogs | `docs/design/checks.md` | [The five checks](design/checks.md#the-five-checks) |
-| What the code a check runs can read, and why it is no sandbox | `docs/design/checks.md` | [What the code a check runs can read](design/checks.md#what-the-code-a-check-runs-can-read) |
-| The agent runtime and its self-test | `docs/design/checks.md` | [The agent runtime](design/checks.md#the-agent-runtime) |
-| The 2026-09-29 outage of every agent session | `docs/postmortems/2026-09-29-agent-runtime-drift.md` | [What broke](postmortems/2026-09-29-agent-runtime-drift.md#what-broke) |
 | Every configuration key, its type and its default | `docs/reference/configuration.md` | [Configuration reference](reference/configuration.md#configuration-reference) |
-| What is evaluated, the outcomes of an attempt, and the comparison rule | `docs/design/evaluation.md` | [Subjects](design/evaluation.md#2-subjects) |
-| The two suites a run draws its tasks from, and what the benchmark adds to their tasks | `docs/design/evaluation.md` | [The suites](design/evaluation.md#8-the-suites) |
-| The benchmark report: its pages, the diff viewer, and the field outcomes of proposals | `docs/design/evaluation.md` | [The report](design/evaluation.md#7-the-report) |
-| Running the benchmark, comparing records, and publishing them | `docs/operations/benchmark.md` | [A run](operations/benchmark.md#a-run) |
-| Every benchmark metric and its definition | `docs/reference/metrics.md` | [Metrics reference](reference/metrics.md#metrics-reference) |
-| Every field of a benchmark record | `docs/reference/records.md` | [Benchmark record reference](reference/records.md#benchmark-record-reference) |
-| Where a migration session runs, and why only on the runner | `docs/design/deploy-service.md` | [Where a migration session runs](design/deploy-service.md#2-where-a-migration-session-runs) |
-| The run log stream of a running migration | `docs/design/deploy-service.md` | [The run log stream](design/deploy-service.md#3-the-run-log-stream) |
-| The preview deployment: the working copy, the safe entry, lifetime, and what it may not do | `docs/design/deploy-service.md` | [The preview deployment](design/deploy-service.md#4-the-preview-deployment) |
-| Access control for the deploy service, and why a URL is not a secret | `docs/design/deploy-service.md` | [Access control](design/deploy-service.md#5-access-control) |
-| Which actions run the checks, and which are advice | `docs/design/deploy-service.md` | [Check policy](design/deploy-service.md#7-check-policy) |
-| The calls a deploy service must serve, and what it owes beyond their shape | `docs/design/deploy-service.md` | [The HTTP contract](design/deploy-service.md#8-the-http-contract) |
-| What a deploy service answers for a publish, and who pushes the change | `docs/design/deploy-service.md` | [Preview publish](design/deploy-service.md#81-preview-publish) |
-| How a live preview reaches a model without receiving the provider key | `docs/design/deploy-service.md` | [Preview model access](design/deploy-service.md#12-preview-model-access) |
-| How the reference deploy service is built: run store, idempotency, preview manager, instance providers | `docs/design/deploy-service.md` | [The reference implementation](design/deploy-service.md#9-the-reference-implementation) |
-| Checking any deploy service against the Action's client | `docs/design/deploy-service.md` | [The conformance suite](design/deploy-service.md#10-the-conformance-suite) |
-| Running the reference deploy service: images, configuration, compose, Terraform, wiring a repository, verifying | `docs/operations/deploy-service.md` | [Configuration](operations/deploy-service.md#configuration) |
-| What a host needs to run the deploy service, at any provider | `docs/operations/deploy-service.md` | [On any host with Docker](operations/deploy-service.md#on-any-host-with-docker) |
 | The rules for every agent session in this repository | `AGENTS.md` | [Repository invariants](../AGENTS.md#repository-invariants) |
 | Every project term, its name in code, and the words it replaces | `docs/glossary.md` | [Migrations](glossary.md#migrations) |
 | The full engineering principles every change follows | `docs/engineering.md` | [Persistent data design](engineering.md#1-persistent-data-design) |
 | The user-facing capability catalog | `docs/features.md` | [Feature catalog](features.md#feature-catalog) |
 | The index of design decisions and open questions | `docs/decisions.md` | [Design decisions index](decisions.md#design-decisions-index) |
 | How an open question becomes a design decision | `docs/proposals/README.md` | [Lifecycle](proposals/README.md#lifecycle) |
-| The proposal for opt-in consumer run evidence intake | `docs/proposals/evidence-intake.md` | [Problem](proposals/evidence-intake.md#problem) |
-| The parked proposal for bring-your-own-key preview access | `docs/proposals/preview-byok.md` | [Problem](proposals/preview-byok.md#problem) |
 | How documentation is organised, written, and kept from drifting | `docs/AGENTS.md` | [The tier taxonomy: one home per fact](AGENTS.md#the-tier-taxonomy-one-home-per-fact) |

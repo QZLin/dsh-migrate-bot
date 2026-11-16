@@ -8,7 +8,7 @@ Each fact has exactly one home — the tier whose job it is. Everywhere else, li
 
 | Tier | Job | Does not belong there |
 |---|---|---|
-| [../README.md](../README.md) | The product: what the Action does, and where a consumer and a contributor start | Design rationale, benchmark methodology, open work, the installation steps, which [operations/](operations/install.md) owns, and the configuration table, which [reference/](reference/configuration.md) owns |
+| [../README.md](../README.md) | The product: what the Action does, and where a consumer and a contributor start | Design rationale, open work, the installation steps, which [operations/](operations/install.md) owns, and the configuration table, which [reference/](reference/configuration.md) owns |
 | [../AGENTS.md](../AGENTS.md) | Rules an agent needs in context every session, one to three lines each | Worked examples, incident narratives, anything restated from a linked home |
 | [glossary.md](glossary.md) | Every project term, once | Procedures, rationale |
 | [features.md](features.md) | The user-facing capability catalog: entry point, implementation, and owning document | Detailed behaviour, which the owning document states |
@@ -16,23 +16,17 @@ Each fact has exactly one home — the tier whose job it is. Everywhere else, li
 | [decisions.md](decisions.md) | The index of decided and open questions, linking their owners | The decision text, which the owning document holds |
 | [proposals/](proposals/README.md) | Open or parked questions awaiting the owner's decision, with options, costs and acceptance criteria | Decided designs, which move into the owning document |
 | [index.md](index.md) | The lookup table: subject → owning document → owning section | Any fact of its own; every row points somewhere else |
-| [reference/](reference/workflow.md) | Generated: the configuration keys, the workflow statechart, the comment commands, the benchmark metrics and records | Hand edits; change the source the page names |
-| [design/](design/workflow.md) | How a mechanism works, why it is shaped that way, what it guarantees; how the Action is evaluated | Measured results, procedures, current task state |
-| [operations/](operations/install.md) | Procedures: installing the Action, releasing it, running the benchmark | Design rationale |
-| [postmortems/](postmortems/2026-09-29-agent-runtime-drift.md) | What broke, why, and what changed | Rules, which link their reasoning instead |
-| [../CHANGELOG.md](../CHANGELOG.md) | Generated release history | Hand-written entries |
+| [reference/](reference/workflow.md) | Generated: the configuration keys and the workflow statechart | Hand edits; change the source the page names |
+| [design/](design/workflow.md) | How a mechanism works, why it is shaped that way, what it guarantees | Procedures, current task state |
+| [operations/](operations/install.md) | Procedures: installing the Action, releasing it | Design rationale |
 
-Placement in one line: current behaviour → README; configuration, workflow, commands, metrics and the record format → `reference/`, generated; installing, releasing and benchmarking → `operations/`; a rule → AGENTS.md; how a mechanism works and how it is evaluated → `design/`; what it scored → the records on `bench/records`.
+Placement in one line: current behaviour → README; configuration and the workflow → `reference/`, generated; installing and releasing → `operations/`; a rule → AGENTS.md; how a mechanism works → `design/`.
 
 ## The index is computed, not trusted
 
 [index.md](index.md) is the progressive-disclosure entry point, and `scripts/verify-doc-index.ts` holds it to that: each row's home must exist, its entry-point anchor must match a heading the gate computes from the target document, and every Markdown file under `docs/` plus `../README.md` and `../AGENTS.md` must appear as some row's home. A renamed heading or an unindexed new document fails CI.
 
 Rows keep a fixed shape because the gate reads them: one topic, one backticked repository-root-relative home path, and exactly one link whose path resolves to that home and whose fragment names a real section. Link paths are written relative to the index, because that is what renders.
-
-## The wiki is a projection
-
-The site build projects [README.md](../README.md), [AGENTS.md](../AGENTS.md), and the documents under `docs/` into the built site’s `data/wiki.json` index and one `data/wiki-pages/*.json` document per page; [site/wiki.html](../site/wiki.html) fetches the selected page and renders it with its sidebar. Links between documents resolve to wiki pages, and the decisions page renders [decisions.md](decisions.md), whose rows link to the Design decisions sections. The projection is disposable: edit the source document and rebuild the site, never the generated JSON.
 
 ## Writing rules
 
@@ -47,4 +41,4 @@ The site build projects [README.md](../README.md), [AGENTS.md](../AGENTS.md), an
 
 ## Design decisions
 
-- **Documentation is projected into an indexed, per-page wiki generated by the site build** (*decided*). Why: one navigation and one build keep the documentation and the benchmark report in the same place, while the repository documents remain the single source. Constraint: the wiki contains no independent content; every page has a source file under `README.md`, `AGENTS.md`, or `docs/`; the site build regenerates the projection. Revisit when: a document needs a rendering feature that the projection cannot express, or the wiki needs an authenticated server.
+- **Documentation is a set of Markdown documents held by computed gates, and no built site** (*decided*). Why: the gates check what a reader relies on — that every document is indexed, every link resolves, every term is defined once — while a generated site duplicated the content and had to be rebuilt to be true. Constraint: every document under `docs/` appears in [the index](index.md), and its facts have exactly one home. Revisit when: a consumer needs a rendered, searchable copy the repository does not serve.

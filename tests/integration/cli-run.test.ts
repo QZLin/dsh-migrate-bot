@@ -10,31 +10,13 @@ import { FakeGitHub } from '../support/github.ts'
 import { serve } from '../support/serve.ts'
 
 /**
- * The whole CLI, end to end: a migration runs to a proposal, and the merge of
- * that proposal is reported. The agent runtime is a stub that answers like dsh
- * (`DSH_BIN`), and GitHub is the in-memory fake served over HTTP; the state
- * branch is a real git remote.
+ * The whole CLI, end to end: one run bumps the plugin, checks it and proposes
+ * the result, and the next run reconciles the merged proposal. GitHub is the
+ * in-memory fake served over HTTP, the state branch is a real git remote, and
+ * `npm` is a stub, so nothing reaches the network and no model is consulted.
  */
 
 const CLI = join(appRootFrom(import.meta.url), 'dist', 'src', 'cli.js')
-
-const STUB = `#!/usr/bin/env node
-const task = process.env.DSH_MIGRATE_TASK ?? ''
-if (!process.env.DEEPSEEK_API_KEY) {
-  process.stderr.write('dsh-migrate: MISSING_CREDENTIAL: llm-deepseek: no API key\\n')
-  process.exit(1)
-}
-process.stderr.write('dsh-migrate-status: ' + JSON.stringify({ turns: 1, steps: 2, elapsedSeconds: 1, inputTokens: 100, outputTokens: 50, cacheHitTokens: 10, cacheMissTokens: 90, costUsd: 0.01 }) + '\\n')
-const fs = require('node:fs')
-if (task.includes('Output contract')) {
-  process.stdout.write('Findings.\\n\\n\`\`\`json\\n{"title":"Clean migration","findings":[],"limits":[]}\\n\`\`\`\\n')
-} else if (task.includes('extension points of a harness release')) {
-  fs.appendFileSync('index.js', 'export const migrated = true\\n')
-  process.stdout.write('# Extension points\\n\\n## 3. Edits you made\\nadded an export\\n')
-} else {
-  process.stdout.write('# Overlap\\n\\n## 3. Decision\\nkeep\\n')
-}
-`
 
 function run(args: string[], env: Record<string, string>): Promise<{ status: number | null; output: string }> {
   return new Promise((resolve) => {
@@ -46,94 +28,130 @@ function run(args: string[], env: Record<string, string>): Promise<{ status: num
   })
 }
 
-test('a migration runs to a proposal, and its merge is reported to the enabled channel', async () => {
+/**
+ * An offline `npm` on PATH. The shell that runs a mechanical command is `sh` on
+ * Linux and `cmd.exe` on Windows, so both names are written: the stub installs
+ * nothing either way.
+ */
+function stubNpm(bin: string): void {
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(join(bin, 'npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  writeFileSync(join(bin, 'npm.cmd'), '@exit /b 0\r\n')
+}
+
+/** A plugin checkout wired to the fake GitHub, with an offline `npm` and a test command. */
+function prepare(testCommand: string, extraFiles: Record<string, string> = {}) {
   const repo = checkout({
-    'package.json': JSON.stringify({ name: '@acme/plugin', version: '1.0.0', dsh: { bundle: { patch: './cordis.patch.yml' } }, peerDependencies: { '@deepseek-ai/dsh-agent': '^0.1.7' } }),
+    'package.json': JSON.stringify({
+      name: '@acme/plugin',
+      version: '1.0.0',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+      peerDependencies: { '@deepseek-ai/dsh-agent': '^0.1.7' },
+    }, null, 2) + '\n',
     'cordis.patch.yml': '[]\n',
     'index.js': 'export const apply = () => {}\n',
+    ...extraFiles,
   })
+  mkdirSync(join(repo.work, '.github'))
+  writeFileSync(join(repo.work, '.github', 'dsh-migrate.yml'), [
+    'checks:',
+    '  boot:',
+    '    enabled: false',
+    '  web:',
+    '    enabled: false',
+    'tests:',
+    '  commands:',
+    // Quoted, so YAML keeps it a string: `true` alone is a boolean.
+    `    - "${testCommand}"`,
+    '',
+  ].join('\n'))
+  repo.git(['add', '-A'])
+  repo.git(['commit', '--quiet', '-m', 'config'])
+  repo.git(['push', '--quiet', 'origin', 'HEAD:main'])
+  // `node_modules` is present so the mechanical check installs nothing.
+  mkdirSync(join(repo.work, 'node_modules'))
+  const bin = join(repo.work, '..', 'bin')
+  stubNpm(bin)
+  const output = join(repo.work, '..', 'github-output')
+  writeFileSync(output, '')
+  return { repo, bin, output }
+}
+
+function environment(repo: { work: string }, bin: string, output: string, apiUrl: string): Record<string, string> {
+  // A command runs through the platform's shell, so PATH needs that platform's
+  // separator; the stub directory comes first either way.
+  const delimiter = process.platform === 'win32' ? ';' : ':'
+  return {
+    PATH: [bin, process.env.PATH ?? ''].join(delimiter),
+    HOME: process.env.HOME ?? '',
+    DSH_MIGRATE_HOME: join(repo.work, '..', 'home'),
+    GITHUB_TOKEN: 'gh-token',
+    GITHUB_REPOSITORY: 'acme/plugin',
+    GITHUB_API_URL: apiUrl,
+    GITHUB_OUTPUT: output,
+  }
+}
+
+test('a run bumps the plugin, checks it and proposes the result, and the next run reconciles the merge', async () => {
   const github = new FakeGitHub('acme/plugin')
   const server = await serve(github.fetch)
+  const { repo, bin, output } = prepare('true')
   try {
-    mkdirSync(join(repo.work, '.github'))
-    writeFileSync(join(repo.work, '.github', 'dsh-migrate.yml'), [
-      'agent:',
-      '  provider: stub',
-      'checks:',
-      '  boot:',
-      '    enabled: false',
-      '  web:',
-      '    enabled: false',
-      '  e2e:',
-      '    enabled: false',
-      'tests:',
-      '  commands:',
-      '    - "true"',
-      'reports:',
-      '  channels:',
-      '    migrate-bot:',
-      '      enabled: true',
-      '',
-    ].join('\n'))
-    repo.git(['add', '-A'])
-    repo.git(['commit', '--quiet', '-m', 'config'])
-    repo.git(['push', '--quiet', 'origin', 'HEAD:main'])
-    mkdirSync(join(repo.work, 'node_modules'))
-    const stub = join(repo.work, '..', 'dsh-stub.cjs')
-    writeFileSync(stub, STUB, { mode: 0o755 })
-    // No network: npm is a stub that installs nothing, and the harness checkout
-    // is already the target's, which the checkout reuses.
-    const bin = join(repo.work, '..', 'bin')
-    mkdirSync(bin)
-    writeFileSync(join(bin, 'npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-    const home = join(repo.work, '..', 'home')
-    mkdirSync(join(home, 'harness', '.git'), { recursive: true })
-    writeFileSync(join(home, 'harness', '.dsh-migrate-tag'), 'dsh-v0.2.0\n')
-    const output = join(repo.work, '..', 'github-output')
-    writeFileSync(output, '')
-    const env = {
-      PATH: `${bin}:${process.env.PATH ?? ''}`,
-      HOME: process.env.HOME ?? '',
-      DSH_BIN: stub,
-      DSH_MIGRATE_HOME: home,
-      DEEPSEEK_API_KEY_DSH_MIGRATE_BOT: 'sk-stub',
-      GITHUB_TOKEN: 'ghs_stub',
-      GITHUB_REPOSITORY: 'acme/plugin',
-      GITHUB_API_URL: server.url,
-      GITHUB_OUTPUT: output,
-      DSH_MIGRATE_REPORT_BOT_TOKEN: 'ghp_stub',
-    }
+    const env = environment(repo, bin, output, server.url)
 
-    const migrated = await run(['run', '--workdir', repo.work, '--target', '0.2.0'], env)
-    assert.equal(migrated.status, 0, migrated.output)
+    const bumped = await run(['bump', '--workdir', repo.work, '--target', '0.2.0'], env)
+    assert.equal(bumped.status, 0, bumped.output)
     assert.match(readFileSync(output, 'utf8'), /status=proposed/)
     const pull = [...github.pulls.values()][0]
     assert.equal(pull?.head.ref, 'dsh-migrate/proposal')
-    assert.match(repo.git(['show', 'dsh-migrate/proposal:index.js'], repo.remote), /export const migrated = true/)
+    assert.equal(pull?.draft, false)
+    // The proposal carries the bump: the dsh peer range and the plugin's own version.
+    const manifest = JSON.parse(repo.git(['show', 'dsh-migrate/proposal:package.json'], repo.remote)) as {
+      version: string
+      peerDependencies: Record<string, string>
+    }
+    assert.equal(manifest.version, '1.0.1')
+    assert.equal(manifest.peerDependencies['@deepseek-ai/dsh-agent'], '^0.2.0')
     const issue = [...github.issues.values()][0]
     assert.match(issue?.body ?? '', /Source release: `dsh-v0\.1\.7` \(declared-peers\)/)
-    assert.match(issue?.body ?? '', /## Overlap review[\s\S]*### Decision\n\nkeep/)
+    assert.match(issue?.body ?? '', /peerDependencies\.@deepseek-ai\/dsh-agent: `\^0\.1\.7` → `\^0\.2\.0`/)
 
-    const skipped = await run(['run', '--workdir', repo.work, '--target', '0.2.0'], env)
+    const skipped = await run(['bump', '--workdir', repo.work, '--target', '0.2.0'], env)
     assert.equal(skipped.status, 0)
     assert.match(skipped.output, /skipped \(unchanged-release\)/)
 
-    // The merge's own job never ran (GitHub cancelled it while another job waited): the next run finds the pull request merged.
+    // The merge's own job never ran: the next run finds the pull request merged.
     Object.assign(pull ?? {}, { state: 'closed', merged: true })
-    const merged = await run(['run', '--workdir', repo.work, '--target', '0.2.0'], env)
+    const merged = await run(['bump', '--workdir', repo.work, '--target', '0.2.0'], env)
     assert.equal(merged.status, 0, merged.output)
     assert.match(merged.output, /was merged without its event reaching this Action/)
-    assert.deepEqual(github.external.map(report => [report.repo, report.title]), [['royenheart/dsh-migrate-bot', 'Clean migration']])
 
-    const state = new StateStore(repo.clone()).read()
-    const log = state.logs.get('0.2.0') ?? []
+    const log = new StateStore(repo.clone()).read().logs.get('0.2.0') ?? []
     assert.deepEqual(log.filter(entry => entry.kind === 'event').map(entry => entry.kind === 'event' ? entry.event.type : ''), [
-      'session.done', 'session.done', 'check.done', 'check.done', 'tree.inspected', 'proposal.published', 'pull-request.closed', 'report.done',
+      'bump.done', 'check.done', 'tree.inspected', 'proposal.published', 'pull-request.closed',
     ])
-    // The fixture declares no dsh release, so the cards check has no span to hold the tree to.
-    const cards = log.find(entry => entry.kind === 'event' && entry.event.type === 'check.done' && entry.event.result.check === 'cards')
-    assert.equal(cards?.kind === 'event' && cards.event.type === 'check.done' && cards.event.result.outcome, 'skipped')
     assert.match(repo.git(['show', 'dsh-migrate/state:badge.json'], repo.remote), /"message": "dsh-v0\.2\.0"/)
+  } finally {
+    await server.close()
+    repo.cleanup()
+  }
+})
+
+test('a failing check proposes a draft that says what failed, and repairs nothing', async () => {
+  const github = new FakeGitHub('acme/plugin')
+  const server = await serve(github.fetch)
+  // A test the plugin declares that fails, in a file so no shell quoting is involved.
+  const { repo, bin, output } = prepare('node fail.js', { 'fail.js': "console.error('error: boom')\nprocess.exit(1)\n" })
+  try {
+    const env = environment(repo, bin, output, server.url)
+    const failed = await run(['bump', '--workdir', repo.work, '--target', '0.2.0'], env)
+    assert.equal(failed.status, 0, failed.output)
+    const pull = [...github.pulls.values()][0]
+    assert.equal(pull?.draft, true)
+    assert.match(pull?.body ?? '', /this pull request is a draft/)
+    assert.match(pull?.body ?? '', /boom/)
+    // The plugin's own sources are untouched: the Action reports the failure, it does not repair it.
+    assert.equal(repo.git(['show', 'dsh-migrate/proposal:index.js'], repo.remote), 'export const apply = () => {}')
   } finally {
     await server.close()
     repo.cleanup()

@@ -10,7 +10,7 @@ export interface Badge {
 
 const OUTCOME_LABEL: Record<string, string> = {
   awaitingMerge: 'proposed',
-  reporting: 'proposed',
+  accepted: 'merged',
   failed: 'failed',
   rejected: 'rejected',
   superseded: 'proposed',

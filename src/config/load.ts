@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs'
 import { parse as parseYaml } from 'yaml'
 import { z } from 'zod'
 import { configSchema, type MigrateConfig } from './schema.ts'
-import { BUILTIN_CHANNELS } from '../merge-reports/channels.ts'
 
 export class ConfigError extends Error {
   override readonly name = 'ConfigError'
@@ -12,26 +11,28 @@ export class ConfigError extends Error {
  * Keys and values that 1.0 renamed or removed, with what replaced them.
  *
  * Strict validation already rejects them; this table only makes the error name
- * the replacement. It is deleted in 2.0.
+ * the replacement, so a configuration written for the model-driven Action is
+ * told what happened to the keys that no longer do anything.
  */
 const REPLACED: readonly { path: readonly string[]; value?: string; replacement: string }[] = [
   { path: ['dshVersion'], replacement: 'renamed to `target`' },
-  { path: ['dsh'], replacement: 'renamed to `agent`; `dsh.mode` was removed because the agent runtime composes no preset' },
-  { path: ['loop'], replacement: 'renamed to `repair` (`loop.maxAttempts` is `repair.maxAttempts`)' },
+  { path: ['agent'], replacement: 'removed; a migration runs no model' },
+  { path: ['prompts'], replacement: 'removed; a migration runs no model' },
+  { path: ['quota'], replacement: 'removed; a migration spends nothing' },
+  { path: ['secrets'], replacement: 'removed; a migration needs no API key' },
+  { path: ['review'], replacement: 'removed; a migration runs no review' },
+  { path: ['repair'], replacement: 'removed; a failing check is reported, never repaired' },
+  { path: ['reports'], replacement: 'removed; a migration sends no merge report' },
+  { path: ['checks', 'cards'], replacement: 'removed; the change-card ledger belonged to the model-driven review' },
+  { path: ['checks', 'e2e'], replacement: 'removed; the end-to-end suite was authored by a model' },
+  { path: ['timeouts', 'agentMs'], replacement: 'removed; a migration runs no model session' },
+  { path: ['timeouts', 'checkoutMs'], replacement: 'removed; a migration checks out no harness source' },
+  { path: ['deploy'], replacement: 'removed; a migration streams no run log and serves no preview' },
+  { path: ['loop'], replacement: 'removed; a migration makes one attempt' },
   { path: ['watch'], replacement: 'removed; an unchanged target release is always skipped unless the run is forced' },
-  { path: ['issuePr'], replacement: 'removed; every issue and pull request body is English' },
+  { path: ['feedback'], replacement: 'removed; a migration sends no merge report' },
   { path: ['verify'], replacement: 'renamed to `checks` (`verify.boot` is `checks.boot`, `verify.web` is `checks.web`)' },
-  { path: ['e2e'], replacement: 'moved to `checks.e2e` (`e2e.gate` is `checks.e2e.failurePolicy`)' },
-  { path: ['feedback'], replacement: 'renamed to `reports`' },
-  { path: ['prompts', 'absorption'], replacement: 'renamed to `prompts.overlap`' },
-  { path: ['prompts', 'alignment'], replacement: 'renamed to `prompts.extensionPoints`' },
-  { path: ['prompts', 'fix'], replacement: 'renamed to `prompts.repair`' },
-  { path: ['deploy', 'liveView'], replacement: 'renamed to `deploy.logStream`' },
-  {
-    path: ['review', 'policy'],
-    value: 'skip-if-mechanical-pass',
-    replacement: 'replaced by `when-checks-fail`, which also requires the boot, web and end-to-end checks to pass',
-  },
+  { path: ['e2e'], replacement: 'removed; the end-to-end suite was authored by a model' },
 ]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -58,18 +59,6 @@ function replacedKey(document: unknown): string | undefined {
   return undefined
 }
 
-/** Report channels that are not built in must say where, how, what to send, and with which token. */
-function checkUserChannels(config: MigrateConfig): void {
-  for (const [id, channel] of Object.entries(config.reports.channels)) {
-    if (id in BUILTIN_CHANNELS) continue
-    for (const field of ['repo', 'method', 'prompt', 'tokenEnv'] as const) {
-      if (channel[field] === undefined) {
-        throw new ConfigError(`reports.channels.${id}.${field} is required for a channel that is not built in`)
-      }
-    }
-  }
-}
-
 /**
  * Validate a decoded YAML document and fill in the defaults.
  * @param raw - the decoded document; `null` or `undefined` is an empty file.
@@ -80,7 +69,6 @@ export function parseConfig(raw: unknown): MigrateConfig {
   if (replaced !== undefined) throw new ConfigError(replaced)
   const parsed = configSchema.safeParse(document)
   if (!parsed.success) throw new ConfigError(z.prettifyError(parsed.error))
-  checkUserChannels(parsed.data)
   return parsed.data
 }
 

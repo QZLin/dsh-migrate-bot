@@ -10,7 +10,7 @@
  */
 
 import { readdirSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 import { readText, REPO_ROOT } from './repo.ts'
 
@@ -40,7 +40,9 @@ const isPure = (path: string): boolean => CORE.some(dir => path.startsWith(`${di
 export function checkModule(path: string, source: string): PurityViolation[] {
   return runtimeImports(source).flatMap((specifier) => {
     if (!specifier.startsWith('.')) return PACKAGES.has(specifier) ? [] : [{ file: path, detail: `imports the package ${specifier}` }]
-    const target = relative(REPO_ROOT, resolve(REPO_ROOT, dirname(path), specifier))
+    // Repository-relative with forward slashes, whatever the platform's separator
+    // is, so the gate reads the same on every machine.
+    const target = relative(REPO_ROOT, resolve(REPO_ROOT, dirname(path), specifier)).split(sep).join('/')
     return isPure(target) ? [] : [{ file: path, detail: `imports ${target}, which is not part of the pure core` }]
   })
 }

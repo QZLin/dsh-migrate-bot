@@ -3,59 +3,45 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_API_KEY_ENV } from '../../src/config/schema.ts'
-import { loadSecrets } from '../../src/secrets.ts'
+import { loadSecrets, secretValues, withoutSecrets } from '../../src/secrets.ts'
 
-test('reads the default migrate-bot env name first', () => {
-  const secrets = loadSecrets([], {
-    env: {
-      [DEFAULT_API_KEY_ENV]: 'from-default',
-      DEEPSEEK_API_KEY: 'from-legacy',
-    },
-  })
-  assert.equal(secrets.apiKey, 'from-default')
+test('reads the GitHub token from the environment', () => {
+  assert.deepEqual(loadSecrets([], { env: { GITHUB_TOKEN: 'gh-token' } }), { githubToken: 'gh-token' })
+  assert.deepEqual(loadSecrets([], { env: { GITHUB_TOKEN: '' } }), {})
 })
 
-test('falls back to DEEPSEEK_API_KEY when the configured name is empty', () => {
-  const secrets = loadSecrets([], {
-    env: { DEEPSEEK_API_KEY: 'from-legacy' },
-  })
-  assert.equal(secrets.apiKey, 'from-legacy')
-})
-
-test('uses a custom apiKeyEnv from the environment', () => {
-  const secrets = loadSecrets([], {
-    apiKeyEnv: 'MY_DEEPSEEK_KEY',
-    env: {
-      MY_DEEPSEEK_KEY: 'from-custom',
-      [DEFAULT_API_KEY_ENV]: 'from-default',
-    },
-  })
-  assert.equal(secrets.apiKey, 'from-custom')
-})
-
-test('reads the configured key from .secrets.local.json', () => {
+test('reads the token from .secrets.local.json when the environment has none', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-secrets-'))
   try {
-    writeFileSync(join(dir, '.secrets.local.json'), JSON.stringify({
-      MY_DEEPSEEK_KEY: 'from-file',
-    }))
-    const secrets = loadSecrets([dir], { apiKeyEnv: 'MY_DEEPSEEK_KEY', env: {} })
-    assert.equal(secrets.apiKey, 'from-file')
+    writeFileSync(join(dir, '.secrets.local.json'), JSON.stringify({ GITHUB_TOKEN: 'from-file' }))
+    assert.deepEqual(loadSecrets([dir], { env: {} }), { githubToken: 'from-file' })
+    // The environment wins over the file.
+    assert.deepEqual(loadSecrets([dir], { env: { GITHUB_TOKEN: 'from-env' } }), { githubToken: 'from-env' })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('JSON still accepts DEEPSEEK_API_KEY as a local fallback', () => {
+test('a secret file that is not a JSON object is refused', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-secrets-'))
   try {
-    writeFileSync(join(dir, '.secrets.local.json'), JSON.stringify({
-      DEEPSEEK_API_KEY: 'from-legacy-file',
-    }))
-    const secrets = loadSecrets([dir], { env: {} })
-    assert.equal(secrets.apiKey, 'from-legacy-file')
+    writeFileSync(join(dir, '.secrets.local.json'), '[]')
+    assert.throws(() => loadSecrets([dir], { env: {} }), /must be a JSON object/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('the environment of a check holds no token the Action was given', () => {
+  const env = {
+    PATH: '/bin',
+    GITHUB_TOKEN: 'gh-token',
+    GH_TOKEN: 'gh-token',
+    ACTIONS_RUNTIME_TOKEN: 'runtime',
+  }
+  assert.deepEqual(withoutSecrets(env), { PATH: '/bin' })
+})
+
+test('every credential value is collected for redaction, and short ones are not', () => {
+  assert.deepEqual(secretValues({ GITHUB_TOKEN: 'gh-token', GH_TOKEN: 'abc' }), ['gh-token'])
 })

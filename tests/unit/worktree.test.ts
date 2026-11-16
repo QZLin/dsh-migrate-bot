@@ -22,6 +22,7 @@ test('a tree that only grew .dsh-migrate is not changed', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-wt-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     writeFileSync(join(dir, 'keep.txt'), 'ok\n')
@@ -51,6 +52,7 @@ test('stageChanges ignores .dsh-migrate after info/exclude (the Action add failu
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-add-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     writeFileSync(join(dir, 'keep.txt'), 'ok\n')
@@ -78,6 +80,7 @@ test('stageChanges unstages .dsh-migrate even when it is not ignored', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-add2-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     writeFileSync(join(dir, 'keep.txt'), 'ok\n')
@@ -111,6 +114,7 @@ test('dependencies the checks installed are never a change or part of the propos
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-deps-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     writeFileSync(join(dir, 'index.js'), 'export {}\n')
@@ -133,6 +137,7 @@ test('a tree that only grew Agent Notes is not changed', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-notes-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     writeFileSync(join(dir, 'keep.txt'), 'ok\n')
@@ -168,6 +173,7 @@ test('Agent Notes never reach the staged set even when the plugin tracks them', 
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-track-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     mkdirSync(join(dir, '.agents', 'notes', 'implemented'), { recursive: true })
@@ -191,6 +197,7 @@ test('a tree restored from its snapshot loses what was written since and keeps t
   const dir = mkdtempSync(join(tmpdir(), 'dsh-mig-snap-'))
   try {
     git(dir, ['init'])
+    git(dir, ['config', 'core.autocrlf', 'false'])
     git(dir, ['config', 'user.name', 'test'])
     git(dir, ['config', 'user.email', 'test@example.test'])
     writeFileSync(join(dir, 'index.js'), 'export const v = 1\n')

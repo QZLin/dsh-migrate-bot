@@ -5,7 +5,8 @@ import { initialTransition, transition } from 'xstate'
 import { GUARD_DESCRIPTIONS, migrationMachine, type ActivityRequest } from '../../src/workflow/machine.ts'
 import type { AnyStateNode } from 'xstate'
 import { replay, stateOf, type MigrationSnapshot } from '../../src/workflow/projection.ts'
-import type { CheckName, LogEntry, MigrationEvent, MigrationInput } from '../../src/workflow/model.ts'
+import { change, settings } from '../support/migration.ts'
+import type { BumpChangeEntry, LogEntry, MigrationEvent, MigrationInput } from '../../src/workflow/model.ts'
 
 /**
  * Model-based property tests of the migration statechart.
@@ -15,32 +16,16 @@ import type { CheckName, LogEntry, MigrationEvent, MigrationInput } from '../../
  * waits. The invariants of docs/design/workflow.md are asserted on every run.
  */
 
-const CHANNELS = ['upgrade-skill', 'migrate-bot']
-
 const inputArbitrary: fc.Arbitrary<MigrationInput> = fc.record({
   hasSource: fc.boolean(),
-  reviewPolicy: fc.constantFrom('always' as const, 'when-checks-fail' as const),
-  maxAttempts: fc.integer({ min: 1, max: 4 }),
-  e2eFailurePolicy: fc.constantFrom('advisory' as const, 'blocking' as const),
   boot: fc.boolean(),
   web: fc.boolean(),
-  e2e: fc.boolean(),
-  cards: fc.boolean(),
-  e2ePublish: fc.boolean(),
   publish: fc.boolean(),
-  channels: fc.subarray(CHANNELS),
+  ownVersion: fc.boolean(),
 }).map(drawn => ({
   target: { tag: 'dsh-v0.2.0', version: '0.2.0' },
   ...(drawn.hasSource ? { source: { release: { tag: 'dsh-v0.1.7', version: '0.1.7' }, origin: 'verified' as const } } : {}),
-  settings: {
-    reviewPolicy: drawn.reviewPolicy,
-    maxAttempts: drawn.maxAttempts,
-    e2eFailurePolicy: drawn.e2eFailurePolicy,
-    e2ePublish: drawn.e2ePublish,
-    checks: { cards: drawn.cards, boot: drawn.boot, web: drawn.web, e2e: drawn.e2e },
-    publish: drawn.publish,
-    reportChannels: drawn.channels,
-  },
+  settings: settings({ checks: { boot: drawn.boot, web: drawn.web }, publish: drawn.publish, ownVersion: drawn.ownVersion }),
 }))
 
 /** A source of choices the driver consumes while it answers the machine. */
@@ -54,50 +39,31 @@ class Choices {
   }
 }
 
-const FINGERPRINTS = ['TS2304 cannot find name', 'boot: slot crashed', 'e2e: login spec failed']
+const CHANGES: BumpChangeEntry[] = [change('version', '1.0.0', '1.0.1'), change('dependencies.@deepseek-ai/dsh-cli', '^0.1.7', '^0.2.0')]
 
 function answer(request: ActivityRequest, choices: Choices): MigrationEvent {
   switch (request.activity) {
+    case 'bump':
+      return { type: 'bump.done', changes: choices.pick([[], CHANGES]), detail: 'bumped' }
     case 'check': {
       const outcome = choices.pick(['pass', 'pass', 'fail', 'skipped'] as const)
       return {
         type: 'check.done',
-        result: {
-          check: request.check,
-          outcome,
-          fingerprint: outcome === 'fail' ? choices.pick(FINGERPRINTS) : '',
-          detail: '',
-          ...(outcome === 'fail' && request.check === 'e2e' ? { blame: choices.pick(['plugin', 'host'] as const) } : {}),
-        },
+        result: { check: request.check, outcome, fingerprint: outcome === 'fail' ? `${request.check}: TS2304` : '', detail: '' },
       }
     }
-    case 'session':
-      return {
-        type: 'session.done',
-        kind: request.kind,
-        outcome: choices.pick(['completed', 'completed', 'completed', 'completed', 'spend-cap', 'failed'] as const),
-        blocker: request.kind === 'repair' ? choices.pick(['none', 'none', 'incomplete', 'valid'] as const) : 'none',
-        detail: '',
-      }
-    case 'characterize': {
-      const outcome = choices.pick(['characterized', 'skipped', 'failed'] as const)
-      return { type: 'e2e.characterized', outcome, baseline: outcome === 'characterized' ? ['specs/panel.spec.ts › opens'] : [], detail: '' }
-    }
-    case 'publishE2E':
-      return { type: 'e2e.published', outcome: choices.pick(['pushed', 'unchanged', 'failed'] as const), detail: '' }
     case 'inspectTree':
       return { type: 'tree.inspected', changed: choices.pick([true, false]), files: 1 }
     case 'publishProposal':
       return {
         type: 'proposal.published',
-        proposal: { branch: 'dsh-migrate/proposal', headSha: 'abc', issue: { number: 1, url: 'i' }, pullRequest: { number: 2, url: 'p' } },
-      }
-    case 'deliverReport':
-      return {
-        type: 'report.done',
-        channel: request.channel,
-        outcome: choices.pick(['delivered', 'delivered', 'held', 'skipped', 'failed'] as const),
-        detail: '',
+        proposal: {
+          branch: 'dsh-migrate/proposal',
+          headSha: 'abc',
+          issue: { number: 1, url: 'i' },
+          pullRequest: { number: 2, url: 'p' },
+          draft: request.draft,
+        },
       }
   }
 }
@@ -108,9 +74,6 @@ function external(choices: Choices): MigrationEvent {
     { type: 'pull-request.closed', number: 2, merged: false },
     { type: 'pull-request.closed', number: 99, merged: true },
     { type: 'proposal.superseded', by: '0.2.1' },
-    { type: 'command.report', resend: false, comment: 'c1' },
-    { type: 'command.report', resend: true, comment: 'c2' },
-    { type: 'command.report', resend: true, comment: 'c2' },
   ])
 }
 
@@ -127,14 +90,13 @@ function drive(input: MigrationInput, values: readonly number[], withErrors: boo
   let [snapshot, actions] = initialTransition(migrationMachine, input)
   const events: MigrationEvent[] = []
   const requests: ActivityRequest[] = []
-  for (let step = 0; step < 200 && snapshot.status === 'active'; step += 1) {
-    if (stateOf(snapshot) === 'accepted' && choices.pick([0, 1]) === 0) break
+  for (let step = 0; step < 100 && snapshot.status === 'active'; step += 1) {
     const pending = actions.filter(action => action.type === 'run').map(action => action.params as ActivityRequest)
     assert.ok(pending.length <= 1, `one activity per state, got ${String(pending.length)}`)
     let event: MigrationEvent
     const request = pending[0]
     if (request === undefined) {
-      assert.ok(['awaitingMerge', 'accepted'].includes(stateOf(snapshot)), 'only awaitingMerge and accepted wait without an activity')
+      assert.equal(stateOf(snapshot), 'awaitingMerge', 'only awaitingMerge waits without an activity')
       event = external(choices)
     } else {
       requests.push(request)
@@ -151,21 +113,27 @@ function drive(input: MigrationInput, values: readonly number[], withErrors: boo
 /** The inputs of a run; the run itself is driven inside each property so a counterexample stays small. */
 const runArbitrary = fc.tuple(
   inputArbitrary,
-  fc.array(fc.nat({ max: 1000 }), { minLength: 1, maxLength: 400 }),
+  fc.array(fc.nat({ max: 1000 }), { minLength: 1, maxLength: 200 }),
   fc.boolean(),
 )
 
-/** The results the run produced for each check, in order, after the last review or repair. */
-function lastPass(run: Run): Map<CheckName, string> {
-  const outcomes = new Map<CheckName, string>()
-  for (const event of run.events) {
-    if (event.type === 'session.done') outcomes.clear()
-    if (event.type === 'check.done') outcomes.set(event.result.check, event.result.outcome)
-  }
-  return outcomes
+/** The checks that ran, in order, with their outcomes. */
+function checkRuns(run: Run): { check: string; outcome: string }[] {
+  return run.events.flatMap(event => event.type === 'check.done' ? [{ check: event.result.check, outcome: event.result.outcome }] : [])
 }
 
-test('I1 a migration publishes at most once, and only from a changed tree with publishing on', () => {
+test('I1 a migration bumps exactly once, before anything else', () => {
+  fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
+    const run = drive(input, values, withErrors)
+    assert.equal(run.requests.filter(request => request.activity === 'bump').length, 1)
+    assert.equal(run.requests[0]?.activity, 'bump')
+    // The bump answers first; an injected activity error can only replace it.
+    const first = run.events[0]
+    assert.ok(first?.type === 'bump.done' || first?.type === 'activity.error', `first event was ${String(first?.type)}`)
+  }), { numRuns: 500 })
+})
+
+test('I2 a migration publishes at most once, and only from a changed tree with publishing on', () => {
   fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
     const run = drive(input, values, withErrors)
     const publishes = run.requests.filter(request => request.activity === 'publishProposal')
@@ -175,109 +143,51 @@ test('I1 a migration publishes at most once, and only from a changed tree with p
       const inspected = run.events.find(event => event.type === 'tree.inspected')
       assert.equal(inspected?.type === 'tree.inspected' && inspected.changed, true)
     }
-  }), { numRuns: 1000 })
+  }), { numRuns: 500 })
 })
 
-test('I3 the repair loop is bounded and stops early only on evidence', () => {
+test('I3 the proposal is a draft exactly when a check failed before it', () => {
   fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
     const run = drive(input, values, withErrors)
-    const repairs = run.requests.filter(request => request.activity === 'session' && request.kind === 'repair')
-    assert.ok(repairs.length <= run.input.settings.maxAttempts)
-    const failures = run.events
-      .filter(event => event.type === 'check.done' && event.result.outcome === 'fail')
-      .map(event => event.type === 'check.done' ? event.result.fingerprint : '')
-    const { stoppedBy } = run.snapshot.context
-    if (stoppedBy === 'repeated-failure') {
-      assert.equal(failures.at(-1), run.snapshot.context.lastFingerprint)
-      assert.ok(repairs.length < run.input.settings.maxAttempts)
-    }
-    if (stoppedBy === 'upstream-blocker') {
-      const last = run.events.at(-1)
-      assert.equal(last?.type === 'session.done' && last.blocker, 'valid')
-    }
-    // An incomplete blocker declaration never stops the loop.
-    for (const [index, event] of run.events.entries()) {
-      if (event.type === 'session.done' && event.blocker === 'incomplete' && event.outcome === 'completed') {
-        assert.notEqual(run.events[index + 1], undefined, 'the run went on after an incomplete blocker')
-      }
-    }
-  }), { numRuns: 1000 })
+    const publishedAt = run.events.findIndex(event => event.type === 'proposal.published')
+    if (publishedAt < 0) return
+    const failed = run.events.slice(0, publishedAt).some(event => event.type === 'check.done' && event.result.outcome === 'fail')
+    const published = run.events[publishedAt]
+    assert.equal(published?.type === 'proposal.published' && published.proposal.draft, failed)
+    // Requests and their answers line up: the request answered by that event is the publish.
+    const request = run.requests[publishedAt]
+    assert.equal(request?.activity === 'publishProposal' && request.draft, failed)
+  }), { numRuns: 500 })
 })
 
-test('I4 nothing is concluded from a tree whose last checks failed, except an advisory end-to-end failure', () => {
+test('I4 a check pass stops at its first failure', () => {
   fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
     const run = drive(input, values, withErrors)
-    if (!run.requests.some(request => request.activity === 'inspectTree')) return
-    for (const [check, outcome] of lastPass(run)) {
-      if (outcome !== 'fail') continue
-      assert.equal(check, 'e2e', `${check} failed and the migration concluded`)
-      assert.equal(run.input.settings.e2eFailurePolicy, 'advisory')
-      // A failure in the plugin's part concludes only once the repair loop has given up on it.
-      const { failure, attempts, lastFingerprint } = run.snapshot.context
-      if (failure?.blame === 'plugin') assert.ok(attempts >= run.input.settings.maxAttempts || failure.fingerprint === lastFingerprint, 'the plugin broke a test and the migration concluded with repairs left')
-    }
-  }), { numRuns: 1000 })
+    // A failure is the last check of its pass: the check that follows it, if any,
+    // belongs to no pass, because a migration runs one pass.
+    const failedAt = checkRuns(run).findIndex(entry => entry.outcome === 'fail')
+    if (failedAt >= 0) assert.equal(failedAt, checkRuns(run).length - 1, 'a check ran after a failure')
+  }), { numRuns: 500 })
 })
 
-test('a suite that recorded an end-to-end baseline is published once the migration concluded, only then, and only when it is kept', () => {
+test('I5 a migration that concludes without publishing ends compatible only when nothing failed', () => {
   fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
     const run = drive(input, values, withErrors)
-    const publishes = run.requests.findIndex(request => request.activity === 'publishE2E')
-    if (publishes >= 0) assert.ok(run.requests.slice(0, publishes).some(request => request.activity === 'inspectTree'))
-    if (run.snapshot.context.e2eBaseline.length > 0 && run.snapshot.context.concluded !== undefined) assert.equal(publishes >= 0, run.input.settings.e2ePublish)
-  }), { numRuns: 1000 })
+    const state = stateOf(run.snapshot)
+    const failed = run.events.some(event => event.type === 'check.done' && event.result.outcome === 'fail')
+    if (state === 'compatible') assert.equal(failed, false)
+    if (state === 'failed') assert.equal(failed, true)
+    if (state === 'unpublished') assert.equal(run.input.settings.publish, false)
+  }), { numRuns: 500 })
 })
 
-test('an advisory end-to-end failure on the way through the host starts no review and no repair attempt', () => {
+test('I6 a merged proposal verifies its release; a closed one does not', () => {
   fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
     const run = drive(input, values, withErrors)
-    if (run.input.settings.e2eFailurePolicy !== 'advisory') return
-    // requests[i] answered by events[i] until the first wait for an outside event, which this prefix never reaches.
-    for (const [index, event] of run.events.entries()) {
-      if (event.type !== 'check.done' || event.result.check !== 'e2e' || event.result.outcome !== 'fail' || event.result.blame === 'plugin') continue
-      const next = run.requests.slice(index + 1).find(request => request.activity !== 'check')
-      assert.ok(next === undefined || next.activity !== 'session', `a session followed an advisory end-to-end failure: ${JSON.stringify(next)}`)
-    }
-  }), { numRuns: 1000 })
-})
-
-test('I5 a channel never receives the same report twice without a resend', () => {
-  fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
-    const run = drive(input, values, withErrors)
-    const delivered = new Set<string>()
-    let resent = false
-    for (const [index, event] of run.events.entries()) {
-      if (event.type === 'command.report' && event.resend) resent = true
-      if (event.type !== 'report.done' || event.outcome !== 'delivered') continue
-      if (!resent) assert.equal(delivered.has(event.channel), false, `${event.channel} at ${String(index)}`)
-      delivered.add(event.channel)
-    }
-  }), { numRuns: 1000 })
-})
-
-test('I7 a spend-cap breach ends the migration before anything is published', () => {
-  fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
-    const run = drive(input, values, withErrors)
-    const breach = run.events.findIndex(event => event.type === 'session.done' && event.outcome === 'spend-cap')
-    if (breach < 0) return
-    assert.equal(stateOf(run.snapshot), 'failed')
-    assert.equal(run.snapshot.context.stoppedBy, 'spend-cap')
-    assert.equal(breach, run.events.length - 1)
-  }), { numRuns: 1000 })
-})
-
-test('I6 a comment delivered twice is handled once', () => {
-  fc.assert(fc.property(runArbitrary, ([input, values, withErrors]) => {
-    const run = drive(input, values, withErrors)
-    const seen = new Set<string>()
-    for (const [index, event] of run.events.entries()) {
-      if (event.type !== 'command.report') continue
-      if (seen.has(event.comment)) {
-        assert.notEqual(run.events[index + 1]?.type, 'report.done', `comment ${event.comment} was handled twice`)
-      }
-      seen.add(event.comment)
-    }
-  }), { numRuns: 1000 })
+    const merged = run.events.some(event => event.type === 'pull-request.closed' && event.merged && event.number === 2)
+    if (stateOf(run.snapshot) === 'accepted') assert.equal(merged, true)
+    if (stateOf(run.snapshot) === 'rejected') assert.equal(run.events.some(event => event.type === 'pull-request.closed' && !event.merged && event.number === 2), true)
+  }), { numRuns: 500 })
 })
 
 test('an activity error ends the migration in error, whatever state it was in', () => {
@@ -285,7 +195,7 @@ test('an activity error ends the migration in error, whatever state it was in', 
     const run = drive(input, values, withErrors)
     if (!run.events.some(event => event.type === 'activity.error')) return
     assert.equal(stateOf(run.snapshot), 'error')
-  }), { numRuns: 1000 })
+  }), { numRuns: 500 })
 })
 
 test('replaying the log of a run reaches the same state and context', () => {

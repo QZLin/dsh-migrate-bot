@@ -1,5 +1,5 @@
 import { transition } from 'xstate'
-import { redactDeep, redactSecrets } from './agents/session-trace.ts'
+import { redactDeep, redactSecrets } from './render/redact.ts'
 import { BADGE_FILE, logPath, migrationFile, serializeLog, type StateSnapshot, type StateStore } from './state/store.ts'
 import { badgeOf } from './workflow/badge.ts'
 import { inline } from './render/text.ts'
@@ -27,7 +27,7 @@ export interface ActivityResult {
 export type ActivityRunner = (request: ActivityRequest, context: MigrationContext) => Promise<ActivityResult>
 
 /** Activities whose effect leaves the job; the log is pushed right after each. */
-const EFFECTFUL = new Set<ActivityRequest['activity']>(['publishProposal', 'publishE2E', 'deliverReport'])
+const EFFECTFUL = new Set<ActivityRequest['activity']>(['publishProposal'])
 
 export class EngineError extends Error {
   override readonly name = 'EngineError'
@@ -79,16 +79,6 @@ export class InJobEngine {
   async deliver(id: string, event: MigrationEvent): Promise<MigrationView> {
     if (!this.state.logs.has(id)) throw new EngineError(`no migration ${id} on the state branch`)
     this.append(id, { kind: 'event', at: this.now().toISOString(), event })
-    return await this.advance(id)
-  }
-
-  /**
-   * Run what a migration's state still asks for, without an event: the rest
-   * of a reporting pass whose job was cut short.
-   * @param id - the migration id.
-   */
-  async resume(id: string): Promise<MigrationView> {
-    if (!this.state.logs.has(id)) throw new EngineError(`no migration ${id} on the state branch`)
     return await this.advance(id)
   }
 
@@ -167,13 +157,10 @@ export class InJobEngine {
 /** What an activity concluded, in one line of the job log. */
 function outcomeOf(event: MigrationEvent): string {
   switch (event.type) {
+    case 'bump.done':
+      return `  ${event.changes.length} change(s): ${inline(event.detail, 300)}`
     case 'check.done':
       return `  ${event.result.outcome}${event.result.fingerprint === '' ? '' : `: ${inline(event.result.fingerprint, 300)}`}`
-    case 'session.done':
-      return `  ${event.outcome}${event.blocker === 'none' ? '' : `, blocker ${event.blocker}`}`
-    case 'e2e.characterized':
-    case 'e2e.published':
-      return `  ${event.outcome}${event.detail === '' ? '' : `: ${inline(event.detail, 300)}`}`
     case 'activity.error':
       return `  ${event.activity} failed: ${inline(event.detail, 600)}`
     default:
@@ -184,12 +171,12 @@ function outcomeOf(event: MigrationEvent): string {
 function describe(request: ActivityRequest): string {
   switch (request.activity) {
     case 'check':
-      return `${request.check} check${request.release === 'source' ? ' (source release)' : ''}`
-    case 'session':
-      return request.kind === 'repair' ? `repair attempt ${String(request.attempt)}` : `${request.kind} review`
-    case 'deliverReport':
-      return `merge report to ${request.channel}`
-    default:
-      return request.activity
+      return `${request.check} check`
+    case 'publishProposal':
+      return request.draft ? 'publish the proposal as a draft' : 'publish the proposal'
+    case 'bump':
+      return 'bump the plugins to the target release'
+    case 'inspectTree':
+      return 'inspect the tree'
   }
 }

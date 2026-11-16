@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeGithubOutput } from '../../src/github/output.ts'
-import { createDshRunner } from '../../src/agents/dsh.ts'
 
 test('writeGithubOutput appends key=value lines and no-ops without GITHUB_OUTPUT', () => {
   const previous = process.env.GITHUB_OUTPUT
@@ -34,33 +33,4 @@ test('writeGithubOutput appends key=value lines and no-ops without GITHUB_OUTPUT
     else process.env.GITHUB_OUTPUT = previous
     rmSync(dir, { recursive: true, force: true })
   }
-})
-
-test('dsh runner passes profile, prompt, and DSH_MIGRATE_* env', async () => {
-  let captured: { args: string[]; env: NodeJS.ProcessEnv } | undefined
-  const runner = createDshRunner({
-    spawnImpl: async (args, options) => {
-      captured = { args, env: options.env }
-      return { code: 0, stdout: '# Verdict\nkeep\n', stderr: '', timedOut: false }
-    },
-  })
-  const result = await runner.run({
-    kind: 'overlap',
-    prompt: 'review the plugin',
-    workdir: process.cwd(),
-    agent: {
-      provider: 'deepseek-official',
-      model: 'deepseek-v4-flash',
-      thinking: 'enabled',
-      reasoningEffort: 'max',
-      upgradeSkills: false,
-    },
-    apiKey: 'sk-test',
-  })
-  assert.equal(result.report, '# Verdict\nkeep')
-  assert.deepEqual(captured?.args, ['--profile', 'migrate', 'review the plugin'])
-  assert.equal(captured?.env.DEEPSEEK_API_KEY, 'sk-test')
-  assert.equal(captured?.env.DSH_MIGRATE_MODEL, 'deepseek-v4-flash')
-  assert.equal(captured?.env.DSH_MIGRATE_TASK, 'review the plugin')
-  assert.equal(captured?.env.DSH_PERMISSION_MODE, 'danger-full-access')
 })

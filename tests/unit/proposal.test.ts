@@ -11,12 +11,10 @@ import { FakeGitHub } from '../support/github.ts'
 import { contextOf, input, proposal } from '../support/migration.ts'
 
 const ENV = { GITHUB_API_URL: 'https://api.test' }
-const DOCUMENTS = { title: 'Migrate @acme/plugin to DeepSeek Harness 0.2.0', issue: `${PROPOSAL_MARKER}\nissue body`, pullRequest: `${PROPOSAL_MARKER}\npull request body` }
+const DOCUMENTS = { title: 'Bump @acme/plugin to DeepSeek Harness 0.2.0', issue: `${PROPOSAL_MARKER}\nissue body`, pullRequest: `${PROPOSAL_MARKER}\npull request body` }
 
 function migrated(work: string): void {
   writeFileSync(join(work, 'index.js'), 'export const apply = () => {}\n')
-  mkdirSync(join(work, '.dsh-migrate', 'patch-reports', 'pre-step'), { recursive: true })
-  writeFileSync(join(work, '.dsh-migrate', 'patch-reports', 'pre-step', 'report.md'), '# [Feature request] pre-step hook\n\n## Proposal\nadd it\n')
   excludeIgnoredPaths(work)
 }
 
@@ -27,7 +25,7 @@ test('a proposal is one branch, one issue and one pull request, and a retry crea
     migrated(repo.work)
     const deps = { workdir: repo.work, github: new GitHubClient('token', ENV, github.fetch), repository: { owner: 'acme', name: 'plugin' }, defaultBranch: 'main' }
     const context = contextOf(input('0.2.0'), [])
-    const first = await publishProposal(deps, context, DOCUMENTS)
+    const first = await publishProposal(deps, context, DOCUMENTS, false)
     assert.equal(first.event.type, 'proposal.published')
     const published = first.event.type === 'proposal.published' ? first.event.proposal : undefined
     assert.equal(published?.branch, PROPOSAL_BRANCH)
@@ -41,20 +39,16 @@ test('a proposal is one branch, one issue and one pull request, and a retry crea
     assert.equal(pull?.base, 'main')
     assert.match(pull?.body ?? '', new RegExp(`Closes #${String(published?.issue.number)}`))
     assert.doesNotMatch(pull?.body ?? '', /Workflow changes left out/)
-    const issue = github.issues.get(published?.issue.number ?? 0)
-    assert.equal(issue?.comments.filter(comment => comment.body.includes('dsh-migrate:patch-reports:0.2.0')).length, 2)
-    assert.deepEqual([...first.files.keys()], ['patch-reports/pre-step.md'])
 
     // The job died after the effects and before the log was pushed: the retry
     // starts from a fresh checkout and must find what the first attempt made.
     repo.git(['checkout', '--quiet', 'main'])
     migrated(repo.work)
-    const retry = await publishProposal(deps, context, DOCUMENTS)
+    const retry = await publishProposal(deps, context, DOCUMENTS, false)
     const again = retry.event.type === 'proposal.published' ? retry.event.proposal : undefined
     assert.deepEqual([again?.issue.number, again?.pullRequest.number], [published?.issue.number, published?.pullRequest.number])
     assert.equal(github.issues.size, 1)
     assert.equal(github.pulls.size, 1)
-    assert.equal(github.issues.get(again?.issue.number ?? 0)?.comments.length, 2)
   } finally {
     repo.cleanup()
   }
@@ -83,7 +77,7 @@ test('the proposal carries the default branch\'s workflows, and names the workfl
     // The migration changed a workflow too.
     writeFileSync(join(repo.work, '.github', 'workflows', 'ci.yml'), 'name: ci\n')
     const deps = { workdir: repo.work, github: new GitHubClient('token', ENV, github.fetch), repository: { owner: 'acme', name: 'plugin' }, defaultBranch: 'main' }
-    const result = await publishProposal(deps, contextOf(input('0.2.0'), []), DOCUMENTS)
+    const result = await publishProposal(deps, contextOf(input('0.2.0'), []), DOCUMENTS, false)
     const published = result.event.type === 'proposal.published' ? result.event.proposal : undefined
 
     assert.equal(repo.git(['diff', '--name-only', 'main', PROPOSAL_BRANCH, '--', '.github/workflows'], repo.remote), '')
@@ -108,16 +102,44 @@ test('an inherited proposal is updated in place, not opened again', async () => 
     github.addPull({ number: old.pullRequest.number, title: 'old', head: { ref: PROPOSAL_BRANCH, sha: 'c'.repeat(40) } })
     migrated(repo.work)
     const deps = { workdir: repo.work, github: new GitHubClient('token', ENV, github.fetch), repository: { owner: 'acme', name: 'plugin' }, defaultBranch: 'main' }
-    const result = await publishProposal(deps, contextOf(input('0.2.1', { proposal: old }), []), { ...DOCUMENTS, title: 'Migrate to 0.2.1' })
+    const result = await publishProposal(deps, contextOf(input('0.2.1', { proposal: old }), []), { ...DOCUMENTS, title: 'Bump to 0.2.1' }, false)
     const updated = result.event.type === 'proposal.published' ? result.event.proposal : undefined
     assert.deepEqual([updated?.issue.number, updated?.pullRequest.number], [old.issue.number, old.pullRequest.number])
-    assert.equal(github.pulls.get(old.pullRequest.number)?.title, 'Migrate to 0.2.1')
-    assert.equal(github.issues.get(old.issue.number)?.title, 'Migrate to 0.2.1')
+    assert.equal(github.pulls.get(old.pullRequest.number)?.title, 'Bump to 0.2.1')
+    assert.equal(github.issues.get(old.issue.number)?.title, 'Bump to 0.2.1')
     assert.equal(github.requests.filter(request => request.method === 'POST' && request.path.endsWith('/pulls')).length, 0)
   } finally {
     repo.cleanup()
   }
 })
+
+for (const [initialDraft, nextDraft] of [[false, true], [true, false], [true, true]] as const) {
+  test(`an inherited proposal changes draft state ${String(initialDraft)} -> ${String(nextDraft)} through GitHub's supported API`, async () => {
+    const repo = checkout()
+    const github = new FakeGitHub()
+    try {
+      const old = proposal(12, initialDraft)
+      github.addIssue({ number: old.issue.number, title: 'old', body: 'old' })
+      github.addPull({ number: old.pullRequest.number, draft: initialDraft, head: { ref: PROPOSAL_BRANCH, sha: 'c'.repeat(40) } })
+      migrated(repo.work)
+      const deps = { workdir: repo.work, github: new GitHubClient('token', ENV, github.fetch), repository: { owner: 'acme', name: 'plugin' }, defaultBranch: 'main' }
+      const result = await publishProposal(deps, contextOf(input('0.2.1', { proposal: old }), []), DOCUMENTS, nextDraft)
+      assert.equal(github.pulls.get(old.pullRequest.number)?.draft, nextDraft)
+      assert.equal(result.event.type === 'proposal.published' && result.event.proposal.draft, nextDraft)
+      const conversions = github.requests.filter(request => request.path === '/graphql')
+      assert.equal(conversions.length, initialDraft === nextDraft ? 0 : 1)
+      if (conversions.length === 1) {
+        const mutation = nextDraft ? 'convertPullRequestToDraft' : 'markPullRequestReadyForReview'
+        assert.ok(JSON.stringify(conversions[0]?.body).includes(mutation))
+      }
+      // A repeated publish sees the actual state and does not convert twice.
+      await publishProposal(deps, contextOf(input('0.2.1', { proposal: old }), []), DOCUMENTS, nextDraft)
+      assert.equal(github.requests.filter(request => request.path === '/graphql').length, conversions.length)
+    } finally {
+      repo.cleanup()
+    }
+  })
+}
 
 test('only commits this Action did not author count as maintainer commits', async () => {
   const github = new FakeGitHub()

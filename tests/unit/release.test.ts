@@ -2,8 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { compareReleases, declaredRelease, newest, parseRelease } from '../../src/domain/release.ts'
 import { resolveTarget } from '../../src/github/releases.ts'
-import { classifyBaseline, describeBaseline } from '../../src/domain/outcome.ts'
-import { contextOf, input } from '../support/migration.ts'
 
 test('a tag and a version name the same release; anything else names none', () => {
   assert.deepEqual(parseRelease('dsh-v0.2.0-rc.2'), { tag: 'dsh-v0.2.0-rc.2', version: '0.2.0-rc.2' })
@@ -30,15 +28,4 @@ test('latest is the newest dsh-v tag; a named release is used as given', async (
   assert.equal((await resolveTarget('0.1.7-rc.2', tags)).tag, 'dsh-v0.1.7-rc.2')
   await assert.rejects(resolveTarget('next', tags), /is not `latest`/)
   await assert.rejects(resolveTarget('latest', async () => []), /no dsh-v\* tag/)
-})
-
-test('the pre-migration boot checks classify the failure', () => {
-  const source = { release: { tag: 'dsh-v0.1.7', version: '0.1.7' }, origin: 'verified' as const }
-  const boot = (outcome: 'pass' | 'fail') => ({ type: 'check.done' as const, result: { check: 'boot' as const, outcome, fingerprint: outcome === 'fail' ? 'x' : '', detail: '' } })
-  const withBoot = input('0.2.0', { source, settings: { ...input().settings, checks: { cards: false, boot: true, web: false, e2e: false } } })
-  assert.equal(classifyBaseline(contextOf(withBoot, [boot('pass'), boot('fail')])), 'regression')
-  assert.equal(classifyBaseline(contextOf(withBoot, [boot('fail'), boot('fail')])), 'pre-existing')
-  assert.equal(classifyBaseline(contextOf(withBoot, [boot('pass'), boot('pass')])), 'unaffected')
-  assert.equal(classifyBaseline(contextOf(input(), [])), 'unknown')
-  assert.match(describeBaseline(contextOf(withBoot, [boot('pass'), boot('fail')])), /boots on dsh-v0\.1\.7 \(verified\) and fails on dsh-v0\.2\.0/)
 })

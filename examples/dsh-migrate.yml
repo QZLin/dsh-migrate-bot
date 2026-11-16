@@ -4,25 +4,9 @@
 
 target: latest
 
-agent:
-  provider: deepseek-official
-  model: deepseek-v4-flash
-  thinking: enabled
-  reasoningEffort: max
-
-review:
-  # always | when-checks-fail
-  # when-checks-fail skips the overlap and extension-point reviews when the
-  # unmodified tree already passes every check on the target release.
-  policy: always
-
-repair:
-  maxAttempts: 5
-
-# Env var that holds the DeepSeek API key. The reusable workflow sets only the
-# default name; another needs docs/operations/install.md#a-copy-of-the-reusable-workflow.
-# secrets:
-#   apiKeyEnv: MY_DEEPSEEK_KEY
+bump:
+  # Raise each plugin's own `version` by a patch as well as its dsh ranges.
+  ownVersion: true
 
 # Replaces (does not extend) the built-in mechanical checks.
 # tests:
@@ -30,35 +14,15 @@ repair:
 #     - npm test
 #     - npm run typecheck
 
-# prompts:
-#   overlap: |
-#     custom overlap review prompt
-#   extensionPoints: |
-#     custom extension-point review prompt
-#   repair: |
-#     custom repair prompt
+# The boot check starts the bumped plugin on the target release; the web check
+# loads it in the web composition. Both install the release from npm.
+# checks:
+#   boot:
+#     enabled: true
+#     timeoutMs: 180000
+#   web:
+#     enabled: true
+#     timeoutMs: 120000
 
-# Spend cap in USD; docs/operations/install.md#spend says what it counts.
-# quota:
-#   limit: 2
-
-# Report channels receive a report after a proposal is merged. Every channel is
-# off by default and needs its own token, because none of them writes to the
-# plugin repository the workflow token belongs to.
-# reports:
-#   channels:
-#     upgrade-skill:
-#       enabled: false          # issue -> oh-my-dsh/dsh-plugin-upgrade-skill
-#     migrate-bot:
-#       enabled: false          # issue -> royenheart/dsh-migrate-bot
-#     harness-discussion:
-#       enabled: false          # discussion -> deepseek-ai/deepseek-harness (Ideas)
-#     my-team-log:              # a channel of your own: its token needs a
-#                               # copy of the reusable workflow (docs/operations/install.md#a-copy-of-the-reusable-workflow)
-#       enabled: false
-#       repo: my-org/migration-log
-#       method: issue           # issue | discussion
-#       tokenEnv: MY_MIGRATION_LOG_TOKEN
-#       prompt: |
-#         Report this migration to our team log: which plugin moved to which
-#         release, and what the maintainer changed before merging.
+# timeouts:
+#   commandMs: 1200000

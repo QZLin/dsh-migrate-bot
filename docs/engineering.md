@@ -6,7 +6,7 @@ These principles bind every change to this repository, whether a person or an ag
 
 Business correctness, data integrity, and maintainability come first. Make the smallest structural change that serves the business need. Before changing a persisted format, read the existing model and every read and write path, and reuse a field, query, or service with the same meaning. A new table, file, or field states its business meaning, why it must persist, and why the existing structure is insufficient. Do not persist derivable or temporary display data; a historical snapshot, an audit record, or a measured performance need is an exception only when the change states how the copy stays consistent. Do not mix meanings in one field, reserve fields without a concrete use, or use free-form JSON to avoid modelling.
 
-In this repository persistent data means every durable file: the state branch, run manifests, prompt snapshots, benchmark records, deploy-service run records, and any wire format a released client reads.
+In this repository persistent data means every durable file: the state branch, the event logs it holds, and any wire format a released client reads.
 
 ## 2. CRUD and consistency
 

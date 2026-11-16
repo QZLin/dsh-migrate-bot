@@ -2,14 +2,7 @@ node_modules/
 dist/
 .dsh-migrate/
 .secrets.local.json
+.env
 *.log
 .DS_Store
-.venv/
-__pycache__/
-.bench/
 .verify-scratch/
-jobs/
-.harbor-venv/
-.inspect-demo/
-
-*.pyc

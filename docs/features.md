@@ -1,19 +1,16 @@
 # Feature catalog
 
-The user-facing capabilities of the Action, the benchmark report, and the deploy service. This table is the catalogue of record: each row names the entry point that exercises the feature, the code that implements it, and the document that owns its contract. A change to a feature updates its row and the owning document together.
+The user-facing capabilities of the Action. This table is the catalogue of record: each row names the entry point that exercises the feature, the code that implements it, and the document that owns its contract. A change to a feature updates its row and the owning document together.
 
 | ID | Feature | Entry point | Implementation | Owning document |
 |---|---|---|---|---|
-| F1 | Run one migration between harness releases | `dsh-migrate run` / the Action | `src/cli.ts`, `src/workflow/machine.ts` | [Workflow](design/workflow.md#1-decisions) |
-| F2 | Run the configured tree checks without an API key | `dsh-migrate check` | `src/activities/check-tree.ts` | [Checks](design/checks.md#the-five-checks) |
-| F3 | Read live run evidence from the state branch | `dsh-migrate inspect [--json]` | `src/inspect/html.ts`, `src/observability/evidence.ts` | [Run evidence](design/evaluation.md#7-the-report) |
-| F4 | Run the Harbor benchmark and compare records | `npm run bench -- run` | `scripts/bench.ts`, `src/evaluation/` | [Benchmark](operations/benchmark.md#a-run) |
-| F5 | Read the benchmark report | `npm run site` / GitHub Pages | `scripts/site.ts`, `site/` | [The report](design/evaluation.md#7-the-report) |
-| F6 | Read the documentation wiki | `npm run site`, then **Wiki** | `scripts/wiki.ts`, `site/wiki.html` | [Documentation standard](AGENTS.md#the-wiki-is-a-projection) |
-| F7 | Stream a run log and publish a preview | deploy service `/runs`, `/view`, `/p/<id>/` or `p-<id>.<PREVIEW_DOMAIN>`, `/previews` | `deploy-service/src/` | [The HTTP contract](design/deploy-service.md#8-the-http-contract) |
-| F8 | Ask for status, a report, or a preview action by comment | `/dsh-migrate …` comment | `src/cli.ts`, `src/commands/` | [Comment commands](design/workflow.md#9-comment-commands) |
-| F9 | Deliver merge reports to configured channels | `reports.channels` | `src/merge-reports/` | [Merge reports](design/workflow.md#8-merge-reports) |
-| F10 | Store and serve run evidence for automatic inspection | deploy service `/view/<runId>/inspect.json` (current run plus history) | `deploy-service/src/runs.ts`, `src/deploy/evidence.ts` | [HTTP contract](design/deploy-service.md#8-the-http-contract) |
-| F11 | Use a model in a live preview without local checkout | deploy service model gateway + `/p/<id>/` or `p-<id>.<PREVIEW_DOMAIN>` | `deploy-service/src/model-gateway.ts` | [Preview model access](design/deploy-service.md#12-preview-model-access) |
+| F1 | Bump a plugin repository to a harness release, check it, and propose the result | `dsh-migrate bump` / the Action | `src/cli.ts`, `src/workflow/machine.ts` | [Workflow](design/workflow.md#1-decisions) |
+| F2 | Raise every `@deepseek-ai/dsh-*` range, and the plugin's own version, by a patch | `bump.ownVersion` | `src/domain/bump.ts`, `src/activities/bump.ts` | [Workflow](design/workflow.md#2-the-shape) |
+| F3 | Run the checks on a working tree without starting a migration | `dsh-migrate check` | `src/activities/check-tree.ts` | [Checks](design/checks.md#the-checks) |
+| F4 | Publish a proposal, as a draft when a check failed | the Action | `src/activities/proposal.ts`, `src/github/templates.ts` | [The proposal](design/workflow.md#5-what-a-consumer-sees) |
+| F5 | Keep the migration record and the README badge on the state branch | the Action | `src/state/store.ts`, `src/workflow/badge.ts` | [The state branch](design/workflow.md#4-the-state-branch) |
+| F6 | Skip a release already processed, and take over an open proposal | `force`, the schedule | `src/workflow/start.ts` | [Starting a migration](design/workflow.md#6-starting-a-migration) |
+| F7 | Read the migration state as JSON | `dsh-migrate status` | `src/cli.ts` | [The state branch](design/workflow.md#4-the-state-branch) |
+| F8 | Print the validated configuration | `dsh-migrate print-config` | `src/config/load.ts` | [Configuration reference](reference/configuration.md#configuration-reference) |
 
 The catalogue names capabilities, not every function. A new feature adds a row and an entry in [the index](index.md); a removed feature deletes its row.
