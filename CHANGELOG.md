@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/).
 Entries are generated from the commit history by [Commitizen](https://commitizen-tools.github.io/commitizen/); do not edit them by hand.
 
+## v3.0.2 (2026-11-17)
+
+### Fix
+
+- **bump**: preserve peer support when targeting a newer harness
+
 ## v3.0.1 (2026-11-16)
 
 ### Docs
