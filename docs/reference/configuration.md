@@ -10,7 +10,7 @@ A consumer configures the Action in `.github/dsh-migrate.yml`. Every key is opti
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `target` | string | `latest` | The dsh release to bump the plugins to: `latest`, a version such as `0.2.0-rc.2`, or a `dsh-v*` tag. |
-| `bump.ownVersion` | boolean | `true` | Raise each plugin's own `version` by a patch as well as its `@deepseek-ai/dsh-*` ranges. |
+| `bump.ownVersion` | boolean | `true` | Raise each plugin's own `version` by a patch during the dependency update. |
 | `tests.commands` | list of string | — | Shell commands that replace the built-in mechanical checks; they run in each plugin's directory. |
 | `checks.boot.enabled` | boolean | `true` | Run the boot check. |
 | `checks.boot.timeoutMs` | integer | `180000` | Watchdog for one boot check, in milliseconds. |

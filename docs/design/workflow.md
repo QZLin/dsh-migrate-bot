@@ -16,9 +16,30 @@ One migration moves one consumer repository to one target release. It bumps the 
 
 ## 2. The shape
 
-`bumping` raises every `@deepseek-ai/dsh-*` range and, when asked, each plugin version. `checking` runs the enabled checks in order and stops at the first failure, because a later check would report the consequence of the earlier one. `concluding` inspects the tree once and decides: a changed tree with publishing on becomes a proposal; a changed tree with publishing off ends `unpublished`; an unchanged tree that failed ends `failed`; an unchanged tree that passed ends `compatible`. `publishing` pushes the branch and opens or updates the issue and the pull request. `awaitingMerge` waits for the maintainer, and its close moves the migration to `accepted` or `rejected`.
+`bumping` applies the dependency version policy below and, when asked, raises each plugin version. `checking` runs the enabled checks in order and stops at the first failure, because a later check would report the consequence of the earlier one. `concluding` inspects the tree once and decides: a changed tree with publishing on becomes a proposal; a changed tree with publishing off ends `unpublished`; an unchanged tree that failed ends `failed`; an unchanged tree that passed ends `compatible`. `publishing` pushes the branch and opens or updates the issue and the pull request. `awaitingMerge` waits for the maintainer, and its close moves the migration to `accepted` or `rejected`.
 
 The scope is the repository, not a plugin: a consumer holding several plugins gets one migration, one proposal and one bump event that names every manifest it touched.
+
+### Dependency version policy
+
+The manifest's `devDependencies`, `dependencies` and `optionalDependencies` select packages to install: a dsh dependency there moves to `^<target>`. `peerDependencies` states compatibility with the consumer's runtime, so it is not replaced with the development version. A peer range that already admits the target stays unchanged; otherwise the bump appends ` || ^<target>`. The original range and its exclusions remain intact, so supporting a new target does not drop the runtime versions the plugin already declared.
+
+For a plugin developed and deployed on `0.2.2-rc.1`, an attempt against `0.2.2-rc.3` can produce:
+
+```json
+{
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.1 || ^0.2.2-rc.3"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-agent": "^0.2.2-rc.3"
+  }
+}
+```
+
+A pre-existing `^0.2.2-rc.1` peer already admits `rc.3` and is left as written. Prereleases from a different version cohort need an explicit additional branch by npm's rules. An unrestricted peer is spelled as `>=0.0.0-0` before adding a prerelease branch, because npm otherwise collapses `* || ^<prerelease>` to `*` and discards the target. Non-registry references and packages outside `@deepseek-ai/dsh-*` are untouched.
+
+The target is the version used by the checks, not a request to upgrade the deployed harness. The proposal says so and asks the maintainer to check that deployment's peer requirements before merging. Preserving a declared range does not re-test every historical runtime or prove a source-code migration is backward compatible; this Action changes no plugin source. A manifest that already lost an older peer minimum is not silently repaired: the maintainer restores evidence-backed support once, and subsequent bumps retain it.
 
 ## 3. Invariants
 
@@ -60,6 +81,8 @@ The close of a proposal's pull request normally arrives as its own event. A job 
 A failure is reported where it happened and left there. The check's output is bounded and kept in the proposal (the full log stays in the run directory), the step summary names the failing check, and the badge shows the release as `failed` when nothing was proposed. The Action does not retry, does not edit the plugin, and does not open a second issue: making a failing check pass is the maintainer's change, made on the draft.
 
 ## Design decisions
+
+- **A bump extends peer support rather than replacing the runtime minimum with the test target** (*decided*). Why: a maintainer may develop and validate against a newer harness while users still deploy an older supported one. Constraint: the peer support set does not shrink, existing bounds are retained, and installed dependencies still move to the target; widening does not deploy a harness or repair sources. The [dependency version policy](#dependency-version-policy) owns the exact range rules. Revisit when: the owner explicitly requests a support-policy change that drops older runtimes.
 
 - **A migration consults no model** (*decided*). Why: the work is a version bump plus the plugin's own checks, and both are deterministic; a model in that loop made the outcome depend on a provider, a prompt, a spend cap and a session that could fail on its own. Constraint: no session, prompt, spend cap or repair attempt exists in the Action, and a failing check is never followed by an edit to the plugin. Revisit when: an upgrade needs a change no bump can express and the owner asks for one to be attempted automatically.
 - **A failed migration proposes a draft** (*decided*). Why: the failing output only means something beside the diff that produced it, and reproducing the bump by hand to read it is work the Action already did. Constraint: the proposal is a draft, says the checks fail, and the migration ends `awaitingMerge`; only a migration that changed nothing and failed ends `failed`.

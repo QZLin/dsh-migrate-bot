@@ -123,7 +123,7 @@ export const migrationMachine = setup({
       always: { target: 'bumping' },
     },
     bumping: {
-      description: 'Raise every plugin\'s dsh dependency ranges, and its own version, to the target release.',
+      description: 'Update installed dsh dependencies for the target, retain existing peer support, and optionally raise each plugin version.',
       entry: { type: 'run', params: { activity: 'bump' } },
       on: {
         'bump.done': {

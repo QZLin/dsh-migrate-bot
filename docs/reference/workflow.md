@@ -44,7 +44,7 @@ An *activity* state asks the engine for one activity and leaves on its result. A
 | State | Kind | Activity | Description |
 | --- | --- | --- | --- |
 | `start` | decision |  |  |
-| `bumping` | activity | `bump` | Raise every plugin's dsh dependency ranges, and its own version, to the target release. |
+| `bumping` | activity | `bump` | Update installed dsh dependencies for the target, retain existing peer support, and optionally raise each plugin version. |
 | `checking` | group |  | One pass of checks on the bumped tree; the first failure ends it. |
 | `checking.next` | decision |  |  |
 | `checking.running` | activity | computed from the context | Run the next check of the pass. |

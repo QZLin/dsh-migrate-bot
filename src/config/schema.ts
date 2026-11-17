@@ -24,7 +24,7 @@ export const configSchema = z.strictObject({
     .describe('The dsh release to bump the plugins to: `latest`, a version such as `0.2.0-rc.2`, or a `dsh-v*` tag.'),
   bump: z.strictObject({
     ownVersion: z.boolean().default(true)
-      .describe('Raise each plugin\'s own `version` by a patch as well as its `@deepseek-ai/dsh-*` ranges.'),
+      .describe('Raise each plugin\'s own `version` by a patch during the dependency update.'),
   }).prefault({}),
   tests: z.strictObject({
     commands: z.array(z.string().min(1)).min(1).describe('Shell commands that replace the built-in mechanical checks; they run in each plugin\'s directory.'),

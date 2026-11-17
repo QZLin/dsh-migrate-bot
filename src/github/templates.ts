@@ -49,6 +49,7 @@ export function renderProposal(input: {
     `- Target release: \`${target}\``,
     `- Source release: ${context.input.source === undefined ? 'unknown' : `\`${inline(context.input.source.release.tag, 80)}\` (${context.input.source.origin})`}`,
     `- Bump: ${inline(redact(context.bumpDetail), 300)}`,
+    '- Runtime compatibility: existing dsh peer support is retained; validation does not upgrade your deployed harness.',
     ...(input.runUrl === undefined ? [] : [`- Workflow run: ${input.runUrl}`]),
     ...context.warnings.map(warning => `- Warning: ${inline(redact(warning), 300)}`),
   ].join('\n')
@@ -97,6 +98,7 @@ ${failing === '' ? '' : `\n${failures.map(check => wrapFenced(neutralizeEmbedHtm
 ## Before merging
 
 - [ ] The plugin still documents and exposes the entry points its users rely on.
+- [ ] The deployed harness satisfies the plugin's peer dependencies; this workflow does not deploy a harness upgrade.
 - [ ] Merge with a merge commit, and wait for the workflow run before deleting \`dsh-migrate/proposal\`.
 `
   return { title, issue, pullRequest }

@@ -17,6 +17,7 @@ The entry point to the documentation: `AGENTS.md` holds the rules and links here
 | Which tag a consumer pins, and release candidates | `docs/operations/release.md` | [What a consumer pins](operations/release.md#what-a-consumer-pins) |
 | How a migration runs as a statechart over an event log, and why | `docs/design/workflow.md` | [Decisions](design/workflow.md#1-decisions) |
 | The states of a migration and what each one does | `docs/design/workflow.md` | [The shape](design/workflow.md#2-the-shape) |
+| How dsh installation targets and runtime peer compatibility are updated without dropping old support | `docs/design/workflow.md` | [Dependency version policy](design/workflow.md#dependency-version-policy) |
 | The invariants the workflow keeps, and the tests that hold them | `docs/design/workflow.md` | [Invariants](design/workflow.md#3-invariants) |
 | What the state branch stores, and what is derived from it | `docs/design/workflow.md` | [The state branch](design/workflow.md#4-the-state-branch) |
 | What the proposal is, and how a retry finds what an attempt created | `docs/design/workflow.md` | [What a consumer sees](design/workflow.md#5-what-a-consumer-sees) |

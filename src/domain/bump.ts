@@ -4,11 +4,12 @@ import semver from 'semver'
  * The version bump: what a plugin's `package.json` says after moving to a new
  * harness release, computed without touching the filesystem.
  *
- * A bump rewrites every `@deepseek-ai/dsh-*` range to admit the target release,
- * and, when the consumer asks for it, raises the plugin's own `version` by a
- * patch so the proposal reads as a release of the plugin. Dependencies outside
- * the harness scope and references that are not registry ranges (a workspace or
- * a `file:` path) are left alone.
+ * A bump updates installed `@deepseek-ai/dsh-*` dependencies to the target
+ * release. Peer dependencies are runtime compatibility declarations: their
+ * existing support is retained and the target is added only when needed.
+ * When the consumer asks for it, the plugin's own `version` rises by a patch.
+ * Dependencies outside the harness scope and non-registry references such as
+ * a workspace or a `file:` path are left alone.
  *
  * It performs no check of its own: a range pointed at a package the release no
  * longer publishes is written as it is, and the mechanical checks report it.
@@ -38,9 +39,19 @@ export interface BumpOptions {
   ownVersion: boolean
 }
 
-/** The range a plugin should name for a harness release. */
+/** The target range for installed dependencies and new peer support. */
 export function rangeFor(version: string): string {
   return `^${version}`
+}
+
+/** Retain existing peer support instead of making the test target a runtime minimum. */
+function peerRangeFor(range: string, target: string): string {
+  if (semver.satisfies(target, range)) return range
+  // npm collapses `* || ^<prerelease>` to `*`, losing the explicit prerelease.
+  // Spell an unrestricted peer as a lower comparator so the union survives.
+  // This also retains every prerelease the harness's wildcard check admitted.
+  const current = new semver.Range(range).range === '' ? '>=0.0.0-0' : range
+  return `${current} || ${rangeFor(target)}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,7 +67,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function planBump(manifest: Record<string, unknown>, target: string, options: BumpOptions): BumpPlan {
   const changes: BumpChange[] = []
   const next: Record<string, unknown> = { ...manifest }
-  const desired = rangeFor(target)
+  const targetRange = rangeFor(target)
   for (const block of DEPENDENCY_BLOCKS) {
     const entries = manifest[block]
     if (!isRecord(entries)) continue
@@ -65,6 +76,7 @@ export function planBump(manifest: Record<string, unknown>, target: string, opti
     for (const [name, range] of Object.entries(entries)) {
       // A workspace, file or git reference is not a registry range.
       if (!name.startsWith(DSH_SCOPE) || typeof range !== 'string' || semver.validRange(range) === null) continue
+      const desired = block === 'peerDependencies' ? peerRangeFor(range, target) : targetRange
       if (range === desired) continue
       bumped[name] = desired
       touched = true

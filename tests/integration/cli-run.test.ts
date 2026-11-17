@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
+import semver from 'semver'
 import { appRootFrom } from '../../src/paths.ts'
 import { StateStore } from '../../src/state/store.ts'
 import { checkout } from '../support/repository.ts'
@@ -111,10 +113,10 @@ test('a run bumps the plugin, checks it and proposes the result, and the next ru
       peerDependencies: Record<string, string>
     }
     assert.equal(manifest.version, '1.0.1')
-    assert.equal(manifest.peerDependencies['@deepseek-ai/dsh-agent'], '^0.2.0')
+    assert.equal(manifest.peerDependencies['@deepseek-ai/dsh-agent'], '^0.1.7 || ^0.2.0')
     const issue = [...github.issues.values()][0]
     assert.match(issue?.body ?? '', /Source release: `dsh-v0\.1\.7` \(declared-peers\)/)
-    assert.match(issue?.body ?? '', /peerDependencies\.@deepseek-ai\/dsh-agent: `\^0\.1\.7` → `\^0\.2\.0`/)
+    assert.match(issue?.body ?? '', /peerDependencies\.@deepseek-ai\/dsh-agent: `\^0\.1\.7` → `\^0\.1\.7 \|\| \^0\.2\.0`/)
 
     const skipped = await run(['bump', '--workdir', repo.work, '--target', '0.2.0'], env)
     assert.equal(skipped.status, 0)
@@ -131,6 +133,56 @@ test('a run bumps the plugin, checks it and proposes the result, and the next ru
       'bump.done', 'check.done', 'tree.inspected', 'proposal.published', 'pull-request.closed',
     ])
     assert.match(repo.git(['show', 'dsh-migrate/state:badge.json'], repo.remote), /"message": "dsh-v0\.2\.0"/)
+  } finally {
+    await server.close()
+    repo.cleanup()
+  }
+})
+
+test('a prerelease proposal tests rc.3 without excluding a deployed rc.1 or changing plugin sources', async () => {
+  const source = '0.2.2-rc.1'
+  const target = '0.2.2-rc.3'
+  const dependency = '@deepseek-ai/dsh-agent'
+  const semverPath = createRequire(import.meta.url).resolve('semver')
+  const compatibilityTest = `const assert = require('node:assert/strict')
+const { readFileSync } = require('node:fs')
+const semver = require(${JSON.stringify(semverPath)})
+const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
+const range = manifest.peerDependencies[${JSON.stringify(dependency)}]
+assert.equal(semver.satisfies(${JSON.stringify(source)}, range, { includePrerelease: true }), true, 'the deployed runtime must stay supported')
+assert.equal(semver.satisfies(process.env.DSH_MIGRATE_TARGET_VERSION, range), true, 'the validation target must be admitted')
+assert.equal(manifest.devDependencies[${JSON.stringify(dependency)}], '^' + process.env.DSH_MIGRATE_TARGET_VERSION)
+`
+  const github = new FakeGitHub('acme/plugin')
+  const server = await serve(github.fetch)
+  const { repo, bin, output } = prepare('node compatibility-test.cjs', {
+    'package.json': JSON.stringify({
+      name: '@acme/plugin', version: '1.0.1', type: 'module',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+      peerDependencies: { [dependency]: source },
+      devDependencies: { [dependency]: source },
+    }, null, 2) + '\n',
+    'compatibility-test.cjs': compatibilityTest,
+  })
+  try {
+    const result = await run(['bump', '--workdir', repo.work, '--target', target], environment(repo, bin, output, server.url))
+    assert.equal(result.status, 0, result.output)
+    const pull = [...github.pulls.values()][0]
+    assert.equal(pull?.draft, false, result.output)
+    const manifest = JSON.parse(repo.git(['show', 'dsh-migrate/proposal:package.json'], repo.remote)) as {
+      version: string; peerDependencies: Record<string, string>; devDependencies: Record<string, string>
+    }
+    assert.equal(manifest.version, '1.0.2')
+    assert.equal(manifest.peerDependencies[dependency], `${source} || ^${target}`)
+    assert.equal(semver.satisfies(source, manifest.peerDependencies[dependency] as string, { includePrerelease: true }), true)
+    assert.equal(semver.satisfies(target, manifest.peerDependencies[dependency] as string), true)
+    assert.equal(manifest.devDependencies[dependency], `^${target}`)
+    assert.equal(repo.git(['diff', '--name-only', 'main', 'dsh-migrate/proposal'], repo.remote), 'package.json')
+    assert.equal(repo.git(['show', 'dsh-migrate/proposal:index.js'], repo.remote), 'export const apply = () => {}')
+    const issue = [...github.issues.values()][0]
+    assert.match(issue?.body ?? '', /Source release: `dsh-v0\.2\.2-rc\.1`/)
+    assert.match(pull?.body ?? '', /0\.2\.2-rc\.1 \|\| \^0\.2\.2-rc\.3/)
+    assert.match(pull?.body ?? '', /does not upgrade your deployed harness/)
   } finally {
     await server.close()
     repo.cleanup()

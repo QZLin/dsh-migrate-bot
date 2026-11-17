@@ -5,7 +5,7 @@
 target: latest
 
 bump:
-  # Raise each plugin's own `version` by a patch as well as its dsh ranges.
+  # Raise each plugin's own `version` by a patch during the dependency update.
   ownVersion: true
 
 # Replaces (does not extend) the built-in mechanical checks.
